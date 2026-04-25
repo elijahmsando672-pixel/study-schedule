@@ -3,12 +3,12 @@ const { sequelize } = require('../config/database');
 
 const StudySession = sequelize.define('StudySession', {
   id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
-    primaryKey: true
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
   },
   userId: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: false,
     references: {
       model: 'users',
@@ -16,7 +16,7 @@ const StudySession = sequelize.define('StudySession', {
     }
   },
   taskId: {
-    type: DataTypes.UUID,
+    type: DataTypes.INTEGER,
     allowNull: true,
     references: {
       model: 'tasks',
@@ -33,22 +33,23 @@ const StudySession = sequelize.define('StudySession', {
   },
   duration: {
     type: DataTypes.INTEGER,
-    allowNull: false,
-    validate: {
-      min: 1
-    }
+    allowNull: false
   },
   startTime: {
     type: DataTypes.DATE,
-    defaultValue: DataTypes.NOW
+    allowNull: true
   },
   endTime: {
     type: DataTypes.DATE,
-    defaultValue: null
+    allowNull: true
   },
   completedAt: {
     type: DataTypes.DATE,
     defaultValue: null
+  },
+  notes: {
+    type: DataTypes.TEXT,
+    defaultValue: ''
   }
 }, {
   tableName: 'study_sessions',

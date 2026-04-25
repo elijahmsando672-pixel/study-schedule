@@ -4,6 +4,7 @@ const { protect } = require('../middleware/auth');
 const Task = require('../models/Task');
 const StudySession = require('../models/StudySession');
 const Goal = require('../models/Goal');
+const Subject = require('../models/Subject');
 
 // Protect all routes - require authentication
 router.use(protect);
@@ -42,8 +43,7 @@ router.post('/', async (req, res) => {
             result = await syncGoal(recordId, operation, data);
             break;
           case 'subjects':
-            // Subjects not yet implemented in backend - skip for now
-            result = { success: true, id: recordId, skipped: true, reason: 'Subject sync not implemented' };
+            result = await syncSubject(recordId, operation, data);
             break;
           default:
             result = {
@@ -192,6 +192,40 @@ async function syncGoal(recordId, operation, data) {
   }
 }
 
+async function syncSubject(recordId, operation, data) {
+  try {
+    if (operation === 'INSERT') {
+      const [subject] = await Subject.findOrCreate({
+        where: { id: recordId },
+        defaults: mapSubjectData(data),
+      });
+      return { success: true, id: subject.id };
+    }
+
+    if (operation === 'UPDATE') {
+      const subject = await Subject.findByPk(recordId);
+      if (!subject) {
+        return { success: false, error: 'Subject not found' };
+      }
+      await subject.update(mapSubjectData(data));
+      return { success: true, id: subject.id };
+    }
+
+    if (operation === 'DELETE') {
+      const deleted = await Subject.destroy({ where: { id: recordId } });
+      if (deleted === 0) {
+        return { success: false, error: 'Subject not found' };
+      }
+      return { success: true, id: recordId };
+    }
+
+    return { success: false, error: `Unknown operation: ${operation}` };
+  } catch (error) {
+    console.error('Subject sync error:', error);
+    return { success: false, error: error.message };
+  }
+}
+
 /**
  * Map mobile data formats to server model attributes
  */
@@ -200,7 +234,7 @@ function mapTaskData(data) {
   return {
     title: data.title,
     description: data.description || '',
-    subject: data.subjectName || 'General',
+    subject: data.subjectName || 'General',  // Store subject name as string
     duration: data.duration,
     priority: data.priority || 'medium',
     status: data.status || 'pending',
@@ -208,7 +242,7 @@ function mapTaskData(data) {
     time: data.time || null,
     notes: data.notes || '',
     reminder: data.reminder ? new Date(data.reminder) : null,
-    userId: data.userId || 1, // Will be replaced by authenticated user
+    userId: data.userId || 1,
     completedAt: data.completedAt ? new Date(data.completedAt) : null,
     createdAt: data.createdAt ? new Date(data.createdAt) : new Date(),
     updatedAt: new Date(),
@@ -238,6 +272,16 @@ function mapGoalData(data) {
     userId: data.userId || 1,
     createdAt: data.createdAt ? new Date(data.createdAt) : new Date(),
     updatedAt: new Date(),
+  };
+}
+
+function mapSubjectData(data) {
+  return {
+    name: data.name,
+    color: data.color || '#6366F1',
+    targetHours: data.targetHours || 10,
+    studyGuide: data.studyGuide || '',
+    userId: data.userId || 1,
   };
 }
 
