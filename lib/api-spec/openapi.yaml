@@ -1,0 +1,533 @@
+openapi: 3.0.0
+info:
+  title: Study Tracker API
+  version: 1.0.0
+  description: API for tracking study sessions, subjects, and schedules
+
+servers:
+  - url: http://localhost:3001/api
+
+paths:
+  /dashboard:
+    get:
+      summary: Get dashboard data
+      tags: [dashboard]
+      responses:
+        '200':
+          description: Dashboard data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardData'
+
+  /subjects:
+    get:
+      summary: Get all subjects
+      tags: [subjects]
+      responses:
+        '200':
+          description: List of subjects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Subject'
+    post:
+      summary: Create a subject
+      tags: [subjects]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubjectCreate'
+      responses:
+        '201':
+          description: Subject created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subject'
+
+  /subjects/{id}:
+    get:
+      summary: Get subject by ID
+      tags: [subjects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Subject details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubjectDetail'
+    put:
+      summary: Update subject
+      tags: [subjects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubjectUpdate'
+      responses:
+        '200':
+          description: Subject updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subject'
+    delete:
+      summary: Delete subject
+      tags: [subjects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Subject deleted
+
+  /schedule-slots:
+    get:
+      summary: Get all schedule slots
+      tags: [schedule]
+      responses:
+        '200':
+          description: List of schedule slots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ScheduleSlot'
+    post:
+      summary: Create a schedule slot
+      tags: [schedule]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleSlotCreate'
+      responses:
+        '201':
+          description: Slot created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleSlot'
+
+  /schedule-slots/{id}:
+    put:
+      summary: Update schedule slot
+      tags: [schedule]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleSlotUpdate'
+      responses:
+        '200':
+          description: Slot updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleSlot'
+    delete:
+      summary: Delete schedule slot
+      tags: [schedule]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Slot deleted
+
+  /sessions:
+    get:
+      summary: Get all sessions
+      tags: [sessions]
+      parameters:
+        - name: subjectId
+          in: query
+          schema:
+            type: integer
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: List of sessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Session'
+    post:
+      summary: Create a session
+      tags: [sessions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionCreate'
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+
+  /sessions/{id}:
+    get:
+      summary: Get session by ID
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Session details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+    delete:
+      summary: Delete session
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Session deleted
+
+  /reminders:
+    get:
+      summary: Get all reminders
+      tags: [reminders]
+      responses:
+        '200':
+          description: List of reminders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Reminder'
+    post:
+      summary: Create a reminder
+      tags: [reminders]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReminderCreate'
+      responses:
+        '201':
+          description: Reminder created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reminder'
+
+  /reminders/{id}:
+    put:
+      summary: Update reminder
+      tags: [reminders]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReminderUpdate'
+      responses:
+        '200':
+          description: Reminder updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reminder'
+    delete:
+      summary: Delete reminder
+      tags: [reminders]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Reminder deleted
+
+components:
+  schemas:
+    Subject:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        color:
+          type: string
+        targetHours:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, name, color, targetHours, createdAt]
+
+    SubjectCreate:
+      type: object
+      properties:
+        name:
+          type: string
+        color:
+          type: string
+        targetHours:
+          type: number
+      required: [name, color, targetHours]
+
+    SubjectUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        color:
+          type: string
+        targetHours:
+          type: number
+        studyGuide:
+          type: string
+
+    SubjectDetail:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        color:
+          type: string
+        targetHours:
+          type: number
+        studyGuide:
+          type: string
+        totalHours:
+          type: number
+        sessionsThisWeek:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+
+    ScheduleSlot:
+      type: object
+      properties:
+        id:
+          type: integer
+        dayOfWeek:
+          type: integer
+          minimum: 0
+          maximum: 6
+        startTime:
+          type: string
+        endTime:
+          type: string
+        subjectId:
+          type: integer
+          nullable: true
+        isActive:
+          type: boolean
+
+    ScheduleSlotCreate:
+      type: object
+      properties:
+        dayOfWeek:
+          type: integer
+        startTime:
+          type: string
+        endTime:
+          type: string
+        subjectId:
+          type: integer
+          nullable: true
+        isActive:
+          type: boolean
+      required: [dayOfWeek, startTime, endTime]
+
+    ScheduleSlotUpdate:
+      type: object
+      properties:
+        dayOfWeek:
+          type: integer
+        startTime:
+          type: string
+        endTime:
+          type: string
+        subjectId:
+          type: integer
+          nullable: true
+        isActive:
+          type: boolean
+
+    Session:
+      type: object
+      properties:
+        id:
+          type: integer
+        subjectId:
+          type: integer
+        subjectName:
+          type: string
+        subjectColor:
+          type: string
+        duration:
+          type: integer
+        date:
+          type: string
+          format: date
+        notes:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    SessionCreate:
+      type: object
+      properties:
+        subjectId:
+          type: integer
+        duration:
+          type: integer
+        date:
+          type: string
+          format: date
+        notes:
+          type: string
+      required: [subjectId, duration, date]
+
+    Reminder:
+      type: object
+      properties:
+        id:
+          type: integer
+        subjectId:
+          type: integer
+          nullable: true
+        time:
+          type: string
+        daysOfWeek:
+          type: array
+          items:
+            type: integer
+        isActive:
+          type: boolean
+
+    ReminderCreate:
+      type: object
+      properties:
+        subjectId:
+          type: integer
+          nullable: true
+        time:
+          type: string
+        daysOfWeek:
+          type: array
+          items:
+            type: integer
+        isActive:
+          type: boolean
+      required: [time, daysOfWeek]
+
+    ReminderUpdate:
+      type: object
+      properties:
+        subjectId:
+          type: integer
+          nullable: true
+        time:
+          type: string
+        daysOfWeek:
+          type: array
+          items:
+            type: integer
+        isActive:
+          type: boolean
+
+    DashboardData:
+      type: object
+      properties:
+        greeting:
+          type: string
+        totalHoursThisWeek:
+          type: number
+        currentStreak:
+          type: integer
+        todaySchedule:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScheduleSlot'
+        upcomingSessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Session'
+        weeklyChart:
+          type: array
+          items:
+            type: object
+            properties:
+              day:
+                type: string
+              hours:
+                type: number
