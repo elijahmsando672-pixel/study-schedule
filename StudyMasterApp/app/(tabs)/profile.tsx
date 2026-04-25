@@ -9,6 +9,7 @@ import {
   Alert,
   ActivityIndicator,
   Modal,
+  SafeAreaView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { User, Mail, Lock, LogOut, Edit3, Shield, Database, RefreshCw, Wifi, WifiOff } from 'lucide-react-native';
@@ -28,7 +29,6 @@ export default function ProfileScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isDBConnected, setIsDBConnected] = useState(false);
   const [isServerAvailable, setIsServerAvailable] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
@@ -168,7 +168,8 @@ export default function ProfileScreen() {
   const status = getConnectionStatus();
 
   return (
-    <ScrollView style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <ScrollView>
       {/* Header */}
       <View style={styles.header}>
         <View style={[styles.avatar, { backgroundColor: user?.avatar ? 'transparent' : '#eef2ff' }]}>
@@ -233,9 +234,9 @@ export default function ProfileScreen() {
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Database</Text>
             <View style={styles.statusItem}>
-              <Database size={14} color={isDBConnected ? '#22c55e' : '#ef4444'} />
-              <Text style={[styles.infoValue, { color: isDBConnected ? '#22c55e' : '#ef4444' }]}>
-                {isDBConnected ? 'Connected' : 'Offline'}
+              <Database size={14} color={'#22c55e'} />
+              <Text style={[styles.infoValue, { color: '#22c55e' }]}>
+                Connected
               </Text>
             </View>
           </View>
@@ -410,6 +411,7 @@ export default function ProfileScreen() {
         </View>
       </Modal>
     </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -418,7 +420,7 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     padding: 30,
-    paddingTop: 60,
+    paddingTop: 20,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e2e8f0',

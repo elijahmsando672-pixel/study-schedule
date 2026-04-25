@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, SafeAreaView } from 'react-native';
 import { BarChart3, Target, Trophy, TrendingUp, Calendar, Clock, Flame } from 'lucide-react-native';
 import { useStore } from '@/store/useStore';
 
@@ -7,10 +7,10 @@ export default function StatsScreen() {
   const { tasks, sessions, goals, weeklyProgress, subjectProgress, loadTasks, loadSessions, loadGoals, loadDashboardData } = useStore();
 
   useEffect(() => {
-    loadStats();
+    refreshStats();
   }, []);
 
-  const loadStats = async () => {
+  const refreshStats = async () => {
     await Promise.all([
       loadTasks(),
       loadSessions(),
@@ -56,7 +56,8 @@ export default function StatsScreen() {
   const getSubjectColor = (color?: string) => color || '#6366F1';
 
   return (
-    <ScrollView style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <ScrollView>
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Statistics</Text>
@@ -245,6 +246,7 @@ export default function StatsScreen() {
         )}
       </View>
     </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -263,7 +265,7 @@ function getStatusColor(status: string): string {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8fafc' },
-  header: { padding: 20, paddingTop: 60, borderBottomWidth: 1, borderBottomColor: '#e2e8f0', backgroundColor: '#fff' },
+  header: { padding: 20, paddingTop: 20, borderBottomWidth: 1, borderBottomColor: '#e2e8f0', backgroundColor: '#fff' },
   title: { fontSize: 28, fontWeight: 'bold', color: '#0f172a' },
   subtitle: { fontSize: 14, color: '#64748b', marginTop: 4 },
 

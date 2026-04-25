@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, SafeAreaView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Clock, Flame, Calendar, Target, PlusCircle } from 'lucide-react-native';
 import { useStore } from '@/store/useStore';
@@ -48,10 +48,17 @@ export default function DashboardScreen() {
     subjectProgress,
     todaySchedule,
     addTask,
+    loadSubjects,
+    loadDashboardData,
   } = useStore();
 
   const [subjectId, setSubjectId] = useState('');
   const [duration, setDuration] = useState('');
+
+  useEffect(() => {
+    loadSubjects();
+    loadDashboardData();
+  }, []);
 
   const handleLogSession = async () => {
     if (!subjectId || !duration) {
@@ -118,7 +125,8 @@ export default function DashboardScreen() {
       }));
 
   return (
-    <ScrollView style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <ScrollView>
       <Text style={styles.greeting}>{greeting}</Text>
       <Text style={styles.date}>{formatDate()}</Text>
 
@@ -254,8 +262,7 @@ export default function DashboardScreen() {
         </View>
       </View>
     </ScrollView>
-  );
-}
+    </SafeAreaView>
 
 function calculateGoalPercent(summary: any): number {
   if (!summary) return 0;
@@ -265,9 +272,9 @@ function calculateGoalPercent(summary: any): number {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc', padding: 20, paddingTop: 60, minHeight: '100vh' as any },
-  greeting: { fontSize: 28, fontWeight: 'bold', color: '#0f172a' },
-  date: { fontSize: 14, color: '#64748b', marginBottom: 20 },
+  container: { flex: 1, backgroundColor: '#f8fafc' },
+  greeting: { fontSize: 28, fontWeight: 'bold', color: '#0f172a', padding: 20, paddingTop: 20 },
+  date: { fontSize: 14, color: '#64748b', marginBottom: 20, paddingHorizontal: 20 },
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 20 },
   statCard: {
     width: '48%',

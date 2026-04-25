@@ -8,6 +8,7 @@ import {
   Modal,
   FlatList,
   Vibration,
+  SafeAreaView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Play, Pause, Square, Clock, Target, CheckCircle } from 'lucide-react-native';
@@ -18,7 +19,7 @@ import { Task, Priority } from '@/types';
 
 export default function StudyScreen() {
   const router = useRouter();
-  const { tasks, subjects, addSession, updateTask } = useStore();
+  const { tasks, subjects, loadTasks, loadSubjects, addSession, updateTask } = useStore();
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [showTaskPicker, setShowTaskPicker] = useState(false);
@@ -37,6 +38,12 @@ export default function StudyScreen() {
         clearInterval(intervalRef.current);
       }
     };
+  }, []);
+
+  // Load data on mount
+  useEffect(() => {
+    loadTasks();
+    loadSubjects();
   }, []);
 
   // Reset timer when task changes
@@ -221,7 +228,7 @@ export default function StudyScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Study Timer</Text>
@@ -344,7 +351,7 @@ export default function StudyScreen() {
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -353,7 +360,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8fafc',
     padding: 24,
-    paddingTop: 60,
   },
   header: {
     flexDirection: 'row',

@@ -9,6 +9,7 @@ import {
   Modal,
   Alert,
   FlatList,
+  SafeAreaView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { CheckCircle, Plus, Clock, Calendar, Target, Flame, BarChart3, Edit, Trash2 } from 'lucide-react-native';
@@ -22,6 +23,7 @@ export default function TasksScreen() {
     tasks,
     subjects,
     loadTasks,
+    loadSubjects,
     addTask,
     updateTask,
     deleteTask,
@@ -45,6 +47,7 @@ export default function TasksScreen() {
 
   useEffect(() => {
     loadTasks();
+    loadSubjects();
   }, []);
 
   const handleCreateTask = async () => {
@@ -264,7 +267,7 @@ export default function TasksScreen() {
     tasks.length > 0 ? Math.round((tasks.filter((t) => t.status === 'completed').length / tasks.length) * 100) : 0;
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <View>
@@ -486,7 +489,7 @@ export default function TasksScreen() {
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -497,7 +500,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     padding: 20,
-    paddingTop: 60,
   },
   title: { fontSize: 28, fontWeight: 'bold', color: '#0f172a' },
   subtitle: { fontSize: 14, color: '#64748b', marginTop: 4 },
