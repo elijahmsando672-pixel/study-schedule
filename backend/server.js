@@ -7,6 +7,7 @@ const authRoutes = require('./routes/auth');
 const taskRoutes = require('./routes/tasks');
 const statsRoutes = require('./routes/stats');
 const goalRoutes = require('./routes/goals');
+const syncRoutes = require('./routes/sync');
 
 const app = express();
 
@@ -17,6 +18,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/goals', goalRoutes);
+app.use('/api/sync', syncRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Study Schedule API is running' });

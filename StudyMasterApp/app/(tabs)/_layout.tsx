@@ -1,68 +1,64 @@
 import { Tabs } from 'expo-router';
-import React from 'react';
-import { Text } from 'react-native';
+import { Platform } from 'react-native';
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
-import { Colors } from '@/constants/theme';
-
-const TabIcon = ({ icon, focused }) => (
-  <Text style={{ fontSize: 24, opacity: focused ? 1 : 0.5 }}>{icon}</Text>
-);
+import { Icon } from '@/components/icon';
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
-
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+        tabBarActiveTintColor: '#6366F1',
         headerShown: false,
-        tabBarStyle: {
-          backgroundColor: '#fff',
-          borderTopWidth: 0,
-          elevation: 10,
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: -2 },
-          shadowOpacity: 0.1,
-          shadowRadius: 8,
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 8,
-        },
-      }}>
+        tabBarStyle: Platform.select({
+          ios: {
+            position: 'absolute',
+            borderTopLeftRadius: 16,
+            borderTopRightRadius: 16,
+          },
+          default: {},
+        }),
+      }}
+    >
       <Tabs.Screen
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ focused }) => <TabIcon icon="🏠" focused={focused} />,
+          tabBarIcon: ({ color }) => <Icon name="home" color={color} />,
         }}
       />
       <Tabs.Screen
         name="tasks"
         options={{
           title: 'Tasks',
-          tabBarIcon: ({ focused }) => <TabIcon icon="📋" focused={focused} />,
+          tabBarIcon: ({ color }) => <Icon name="list" color={color} />,
         }}
       />
       <Tabs.Screen
         name="study"
         options={{
           title: 'Study',
-          tabBarIcon: ({ focused }) => <TabIcon icon="⏱️" focused={focused} />,
+          tabBarIcon: ({ color }) => <Icon name="timer" color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="subjects"
+        options={{
+          title: 'Subjects',
+          tabBarIcon: ({ color }) => <Icon name="book" color={color} />,
         }}
       />
       <Tabs.Screen
         name="stats"
         options={{
           title: 'Stats',
-          tabBarIcon: ({ focused }) => <TabIcon icon="📊" focused={focused} />,
+          tabBarIcon: ({ color }) => <Icon name="bar-chart-2" color={color} />,
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ focused }) => <TabIcon icon="👤" focused={focused} />,
+          tabBarIcon: ({ color }) => <Icon name="user" color={color} />,
         }}
       />
     </Tabs>

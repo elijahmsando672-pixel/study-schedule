@@ -1,152 +1,315 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect, useMemo } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert } from 'react-native';
+import { useRouter } from 'expo-router';
+import { Clock, Flame, Calendar, Target, PlusCircle } from 'lucide-react-native';
+import { useStore } from '@/store/useStore';
 
-const getGreeting = () => {
-  const hour = new Date().getHours();
-  if (hour < 12) return 'Good Morning';
-  if (hour < 18) return 'Good Afternoon';
-  return 'Good Evening';
+const WEEKLY_DATA = [
+  { day: 'Sun', min: 0 }, { day: 'Mon', min: 25 }, { day: 'Tue', min: 50 },
+  { day: 'Wed', min: 75 }, { day: 'Thu', min: 100 }, { day: 'Fri', min: 75 },
+  { day: 'Sat', min: 75 }
+];
+
+type StatCardProps = {
+  icon: React.ComponentType<{ size: number; color: string }>;
+  label: string;
+  value: string | number;
+  color: string;
 };
 
-const calculateStreak = (tasks) => {
-  if (!tasks || tasks.filter(t => t.completed).length === 0) return 0;
-  let streak = 0;
-  const now = new Date();
-  for (let i = 0; i < 365; i++) {
-    const checkDate = new Date(now);
-    checkDate.setDate(checkDate.getDate() - i);
-    const dateStr = checkDate.toISOString().split('T')[0];
-    const hasTask = tasks.some(t => t.date === dateStr && t.completed);
-    if (hasTask) streak++;
-    else if (i > 0) break;
-  }
-  return streak;
+const StatCard = ({ icon: Icon, label, value, color }: StatCardProps) => (
+  <View style={styles.statCard}>
+    <View style={[styles.iconBox, { backgroundColor: `${color}20` }]}>
+      <Icon size={24} color={color} />
+    </View>
+    <View>
+      <Text style={styles.statLabel}>{label}</Text>
+      <Text style={styles.statValue}>{value}</Text>
+    </View>
+  </View>
+);
+
+type ProgressBarProps = {
+  progress: number;
 };
 
-const getWeeklyHours = (tasks) => {
-  if (!tasks) return 0;
-  const dayOfWeek = new Date().getDay();
-  const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-  
-  let totalHours = 0;
-  for (let i = 0; i < 7; i++) {
-    const date = new Date(new Date());
-    date.setDate(date.getDate() - diff + i);
-    const dateStr = date.toISOString().split('T')[0];
-    const dayHours = tasks
-      .filter(t => t.date === dateStr && t.completed)
-      .reduce((acc, t) => acc + t.duration, 0) / 60;
-    totalHours += dayHours;
-  }
-  return totalHours.toFixed(1);
-};
+const ProgressBar = ({ progress }: ProgressBarProps) => (
+  <View style={styles.progressBg}>
+    <View style={[styles.progressFill, { width: `${Math.min(100, Math.max(0, progress))}%` }]} />
+  </View>
+);
 
-export default function HomeScreen({ navigation }) {
-  const [tasks, setTasks] = useState([]);
-  const [streak, setStreak] = useState(0);
-  const [weeklyHours, setWeeklyHours] = useState(0);
+export default function DashboardScreen() {
+  const router = useRouter();
+  const {
+    subjects,
+    dashboardSummary,
+    weeklyProgress,
+    subjectProgress,
+    todaySchedule,
+    addTask,
+  } = useStore();
 
-  useEffect(() => {
-    const saved = JSON.parse(localStorage.getItem('studyTasks') || '[]');
-    setTasks(saved);
-    setStreak(calculateStreak(saved));
-    setWeeklyHours(getWeeklyHours(saved));
+  const [subjectId, setSubjectId] = useState('');
+  const [duration, setDuration] = useState('');
+
+  const handleLogSession = async () => {
+    if (!subjectId || !duration) {
+      Alert.alert('Error', 'Please select a subject and enter duration');
+      return;
+    }
+
+    const durationNum = parseInt(duration);
+    if (isNaN(durationNum) || durationNum <= 0) {
+      Alert.alert('Error', 'Please enter a valid duration');
+      return;
+    }
+
+    try {
+      await addTask({
+        title: `Study Session - ${new Date().toLocaleTimeString()}`,
+        subjectId: parseInt(subjectId),
+        duration: durationNum,
+        priority: 'medium',
+        status: 'completed',
+        date: new Date().toISOString().split('T')[0],
+        notes: 'Logged from dashboard',
+      });
+      Alert.alert('Success', `${durationNum} minute session logged!`);
+      setDuration('');
+    } catch (error) {
+      console.error('Error logging session:', error);
+      Alert.alert('Error', 'Failed to log session');
+    }
+  };
+
+  const greeting = useMemo(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good Morning';
+    if (hour < 17) return 'Good Afternoon';
+    return 'Good Evening';
   }, []);
 
-  const today = new Date().toISOString().split('T')[0];
-  const todayTasks = tasks.filter(t => t.date === today);
-  const pendingTasks = todayTasks.filter(t => !t.completed);
+  const formatDate = () => {
+    const date = new Date();
+    return date.toLocaleDateString('en-US', {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  };
+
+  const weeklyData = weeklyProgress.length > 0
+    ? weeklyProgress.map(d => ({ day: d.dayLabel, min: d.minutes }))
+    : WEEKLY_DATA;
+
+  const maxMin = Math.max(...weeklyData.map(d => (d as any).min || 0));
+
+  const subjectsData = subjectProgress.length > 0
+    ? subjectProgress
+    : subjects.map(s => ({
+        subjectId: s.id,
+        subjectName: s.name,
+        color: s.color,
+        minutesThisWeek: 0,
+        goalMinutesPerWeek: s.targetHours * 60,
+        percent: 0,
+      }));
 
   return (
     <ScrollView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.greeting}>{getGreeting()}, Emoh</Text>
-        <Text style={styles.subtitle}>Ready to learn?</Text>
+      <Text style={styles.greeting}>{greeting}</Text>
+      <Text style={styles.date}>{formatDate()}</Text>
+
+      <View style={styles.statsGrid}>
+        <StatCard
+          icon={Clock}
+          label="Today"
+          value={`${dashboardSummary?.minutesToday || 0} min`}
+          color="#3b82f6"
+        />
+        <StatCard
+          icon={Flame}
+          label="Streak"
+          value={`${dashboardSummary?.currentStreakDays || 0} days`}
+          color="#f97316"
+        />
+        <StatCard
+          icon={Calendar}
+          label="This Week"
+          value={`${dashboardSummary?.sessionsThisWeek || 0} sessions`}
+          color="#8b5cf6"
+        />
+        <StatCard
+          icon={Target}
+          label="Goal"
+          value={`${calculateGoalPercent(dashboardSummary)}%`}
+          color="#10b981"
+        />
       </View>
 
-      <View style={styles.statsRow}>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>🔥 {streak}</Text>
-          <Text style={styles.statLabel}>Day Streak</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>📊 {weeklyHours}h</Text>
-          <Text style={styles.statLabel}>This Week</Text>
-        </View>
-      </View>
+      <View style={styles.row}>
+        <View style={styles.leftCol}>
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Weekly Progress</Text>
+            <View style={styles.chart}>
+              {weeklyData.map((item, i) => {
+                const minutes = (item as any).min || 0;
+                const barHeight = maxMin > 0 ? (minutes / maxMin) * 140 : 0;
+                return (
+                  <View key={i} style={styles.barCol}>
+                    <View style={styles.barContainer}>
+                      <View
+                        style={[
+                          styles.bar,
+                          {
+                            height: Math.max(barHeight, 4),
+                            backgroundColor: i === 6 ? '#10b981' : '#3b82f6',
+                          },
+                        ]}
+                      />
+                    </View>
+                    <Text style={styles.barLabel}>{item.day}</Text>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>📅 Today's Tasks</Text>
-        {pendingTasks.length === 0 ? (
-          <Text style={styles.emptyText}>No tasks for today</Text>
-        ) : (
-          pendingTasks.slice(0, 3).map(task => (
-            <TouchableOpacity 
-              key={task.id} 
-              style={styles.taskItem}
-              onPress={() => navigation?.navigate('Study', { task })}
-            >
-              <Text style={styles.taskCheck}>⏳</Text>
-              <View style={styles.taskInfo}>
-                <Text style={styles.taskTitle}>{task.title}</Text>
-                <Text style={styles.taskTime}>{task.time || 'No time set'}</Text>
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Subject Progress</Text>
+            {subjectsData.map((sub: any) => (
+              <View key={sub.subjectId} style={styles.subjectItem}>
+                <View style={styles.subjectRow}>
+                  <View style={[styles.dot, { backgroundColor: sub.color }]} />
+                  <Text style={styles.subjectName}>{sub.subjectName}</Text>
+                  <Text style={styles.subjectMeta}>
+                    {Math.round(sub.minutesThisWeek / 60)}h / {Math.round(sub.goalMinutesPerWeek / 60)}h
+                  </Text>
+                </View>
+                <ProgressBar progress={sub.percent} />
               </View>
-              <Text style={styles.playBtn}>▶</Text>
-            </TouchableOpacity>
-          ))
-        )}
-      </View>
+            ))}
+          </View>
+        </View>
 
-      <TouchableOpacity 
-        style={styles.startButton}
-        onPress={() => navigation?.navigate('Tasks')}
-      >
-        <Text style={styles.startButtonText}>View All Tasks →</Text>
-      </TouchableOpacity>
+        <View style={styles.rightCol}>
+          <View style={[styles.card, { flex: 1 }]}>
+            <Text style={styles.cardTitle}>Quick Log</Text>
+            <View style={styles.form}>
+              <Text style={styles.label}>Subject</Text>
+              <View style={styles.select}>
+                {subjects.map(s => (
+                  <TouchableOpacity
+                    key={s.id}
+                    style={[
+                      styles.selectOption,
+                      subjectId === s.id.toString() && styles.selectOptionActive,
+                    ]}
+                    onPress={() => setSubjectId(s.id.toString())}
+                  >
+                    <View style={[styles.colorDot, { backgroundColor: s.color }]} />
+                    <Text
+                      style={[
+                        styles.selectText,
+                        subjectId === s.id.toString() && styles.selectTextActive,
+                      ]}
+                    >
+                      {s.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={styles.label}>Duration (min)</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. 45"
+                value={duration}
+                onChangeText={setDuration}
+                keyboardType="numeric"
+              />
+              <TouchableOpacity style={styles.logBtn} onPress={handleLogSession}>
+                <PlusCircle size={16} color="#fff" />
+                <Text style={styles.logBtnText}>Log Session</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Today's Schedule</Text>
+            {todaySchedule.length === 0 ? (
+              <Text style={styles.emptySchedule}>No sessions scheduled</Text>
+            ) : (
+              todaySchedule.map((slot, i) => (
+                <View key={i} style={styles.scheduleItem}>
+                  <Text style={styles.scheduleSubject}>{slot.subjectName}</Text>
+                  <Text style={styles.scheduleTime}>
+                    {slot.startTime} - {slot.endTime}
+                  </Text>
+                </View>
+              ))
+            )}
+          </View>
+        </View>
+      </View>
     </ScrollView>
   );
 }
 
+function calculateGoalPercent(summary: any): number {
+  if (!summary) return 0;
+  const { minutesThisWeek, weeklyGoalMinutes } = summary;
+  if (weeklyGoalMinutes <= 0) return 0;
+  return Math.min(100, Math.round((minutesThisWeek / weeklyGoalMinutes) * 100));
+}
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8FAFC', padding: 20, paddingTop: 60 },
-  header: { marginBottom: 24 },
-  greeting: { fontSize: 28, fontWeight: 'bold', color: '#1E293B' },
-  subtitle: { fontSize: 16, color: '#64748B', marginTop: 4 },
-  statsRow: { flexDirection: 'row', gap: 12, marginBottom: 24 },
-  statCard: { 
-    flex: 1, 
-    backgroundColor: '#fff', 
-    borderRadius: 16, 
+  container: { flex: 1, backgroundColor: '#f8fafc', padding: 20, paddingTop: 60, minHeight: '100vh' as any },
+  greeting: { fontSize: 28, fontWeight: 'bold', color: '#0f172a' },
+  date: { fontSize: 14, color: '#64748b', marginBottom: 20 },
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 20 },
+  statCard: {
+    width: '48%',
+    backgroundColor: '#fff',
+    borderRadius: 12,
     padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    flexDirection: 'row',
+    alignItems: 'center' as const,
   },
-  statValue: { fontSize: 24, fontWeight: 'bold', color: '#6366F1' },
-  statLabel: { fontSize: 14, color: '#64748B', marginTop: 4 },
-  section: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 24 },
-  sectionTitle: { fontSize: 18, fontWeight: '600', color: '#1E293B', marginBottom: 12 },
-  emptyText: { color: '#94A3B8', fontSize: 14 },
-  taskItem: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-  },
-  taskCheck: { fontSize: 18, marginRight: 12 },
-  taskInfo: { flex: 1 },
-  taskTitle: { fontSize: 16, color: '#1E293B' },
-  taskTime: { fontSize: 13, color: '#94A3B8', marginTop: 2 },
-  playBtn: { fontSize: 16, color: '#6366F1' },
-  startButton: { 
-    backgroundColor: '#6366F1', 
-    borderRadius: 12, 
-    padding: 16, 
-    alignItems: 'center',
-    marginBottom: 40,
-  },
-  startButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  iconBox: { width: 48, height: 48, borderRadius: 24, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  statLabel: { fontSize: 12, color: '#64748b' },
+  statValue: { fontSize: 18, fontWeight: 'bold' },
+  row: { flexDirection: 'row', gap: 16, flex: 1 },
+  leftCol: { flex: 2 },
+  rightCol: { flex: 1 },
+  card: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 16 },
+  cardTitle: { fontSize: 18, fontWeight: '600', color: '#0f172a', marginBottom: 16 },
+  chart: { flexDirection: 'row', height: 180, justifyContent: 'space-between' },
+  barCol: { alignItems: 'center', flex: 1 },
+  barContainer: { height: 140, width: 24, backgroundColor: '#f1f5f9', borderRadius: 12, justifyContent: 'flex-end' },
+  bar: { width: '100%', borderRadius: 12 },
+  barLabel: { fontSize: 12, color: '#64748b', marginTop: 8 },
+  subjectItem: { marginBottom: 16 },
+  subjectRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  dot: { width: 8, height: 8, borderRadius: 4, marginRight: 8 },
+  subjectName: { flex: 1, fontSize: 14, fontWeight: '500' },
+  subjectMeta: { fontSize: 14, color: '#64748b' },
+  progressBg: { height: 8, backgroundColor: '#f1f5f9', borderRadius: 4, overflow: 'hidden' },
+  progressFill: { height: '100%', backgroundColor: '#0f172a' },
+  form: { gap: 12 },
+  label: { fontSize: 14, fontWeight: '500', color: '#374151' },
+  select: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  selectOption: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6, backgroundColor: '#f1f5f9' },
+  selectOptionActive: { backgroundColor: '#0f172a' },
+  colorDot: { width: 12, height: 12, borderRadius: 6 },
+  selectText: { fontSize: 14, color: '#374151' },
+  selectTextActive: { color: '#fff' },
+  input: { height: 40, borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 6, paddingHorizontal: 12, backgroundColor: '#fff' },
+  logBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#2563eb', paddingVertical: 12, borderRadius: 8 },
+  logBtnText: { color: '#fff', fontWeight: '600', fontSize: 14 },
+  scheduleItem: { padding: 12, borderLeftWidth: 4, borderLeftColor: '#10b981', backgroundColor: '#ecfdf5', borderRadius: 4, marginBottom: 8 },
+  scheduleSubject: { fontWeight: '600', color: '#064e3b' },
+  scheduleTime: { fontSize: 14, color: '#047857' },
+  emptySchedule: { color: '#94a3b8', fontSize: 14 },
 });
