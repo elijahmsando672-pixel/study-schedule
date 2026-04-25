@@ -1,0 +1,1 @@
+[{'userId': {'allowNull': False, 'references': {'key': 'id', 'model': 'users'}}}, {'name': {'type': 'DataTypes.STRING(100)', 'allowNull': False}}, {'color': {'type': 'DataTypes.STRING(20)', 'defaultValue': '#6366F1'}}, {'targetHours': {'type': 'DataTypes.INTEGER', 'defaultValue': 10}}, {'studyGuide': {'type': 'DataTypes.TEXT', 'defaultValue': ''}}]
