@@ -1,5 +1,5 @@
 import * as SQLite from 'expo-sqlite';
-import { Subject, Task, StudySession, Goal, ScheduleSlot, Reminder } from '../types';
+import { Subject, Task, StudySession, Goal, ScheduleSlot, Reminder, Priority, TaskStatus } from '../types';
 
 class DatabaseService {
   private db: SQLite.SQLiteDatabase | null = null;
@@ -11,10 +11,16 @@ class DatabaseService {
       // Enable foreign keys
       await this.db.execAsync('PRAGMA foreign_keys = ON;');
 
-      // Create tables
-      await this.createTables();
+       // Create tables
+       await this.createTables();
 
-      console.log('✅ Database initialized');
+       // Run migrations
+       await this.runMigrations();
+
+       // Generate recurring task instances
+       await this.generateRecurringInstances();
+
+       console.log('✅ Database initialized');
     } catch (error) {
       console.error('❌ Database initialization failed:', error);
       throw error;
@@ -53,6 +59,10 @@ class DatabaseService {
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT,
         completed_at TEXT,
+        is_recurring INTEGER NOT NULL DEFAULT 0,
+        recurrence_pattern TEXT CHECK(recurrence_pattern IN ('daily', 'weekly', 'biweekly', 'monthly')),
+        recurrence_end_date TEXT,
+        recurrence_parent_id INTEGER,
         FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE SET NULL
       )`,
 
@@ -118,15 +128,18 @@ class DatabaseService {
         synced INTEGER NOT NULL DEFAULT 0
       )`,
 
-      // User table (for local auth)
-      `CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        name TEXT NOT NULL,
-        avatar TEXT,
-        created_at TEXT DEFAULT (datetime('now'))
-      )`
+       // User table (for local auth)
+       `CREATE TABLE IF NOT EXISTS users (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         email TEXT UNIQUE NOT NULL,
+         password TEXT NOT NULL,
+         name TEXT NOT NULL,
+         avatar TEXT,
+         created_at TEXT DEFAULT (datetime('now'))
+       )`,
+
+       // Database version table
+       `CREATE TABLE IF NOT EXISTS db_version (version INTEGER NOT NULL)`
     ];
 
     for (const query of queries) {
@@ -203,7 +216,17 @@ class DatabaseService {
 
   // Subject methods
   async getSubjects(): Promise<Subject[]> {
-    return this.getAll<Subject>('subjects');
+    if (!this.db) throw new Error('Database not initialized');
+    const rows = await this.db.getAllAsync<any>('SELECT * FROM subjects');
+    return rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      color: row.color,
+      targetHours: row.target_hours,
+      studyGuide: row.study_guide,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
   }
 
   async getSubjectById(id: number): Promise<Subject | null> {
@@ -289,6 +312,10 @@ class DatabaseService {
       notes: data.notes,
       reminder: data.reminder,
       user_id: data.userId,
+      is_recurring: data.isRecurring ? 1 : 0,
+      recurrence_pattern: data.recurrencePattern,
+      recurrence_end_date: data.recurrenceEndDate,
+      recurrence_parent_id: data.recurrenceParentId,
     };
 
     const id = await this.insert('tasks', taskData);
@@ -310,6 +337,9 @@ class DatabaseService {
     if (data.date !== undefined) updateData.date = data.date;
     if (data.time !== undefined) updateData.time = data.time;
     if (data.notes !== undefined) updateData.notes = data.notes;
+    if (data.isRecurring !== undefined) updateData.is_recurring = data.isRecurring ? 1 : 0;
+    if (data.recurrencePattern !== undefined) updateData.recurrence_pattern = data.recurrencePattern;
+    if (data.recurrenceEndDate !== undefined) updateData.recurrence_end_date = data.recurrenceEndDate;
     updateData.updated_at = new Date().toISOString();
 
     if (data.status === 'completed' && !data.completedAt) {
@@ -385,11 +415,25 @@ class DatabaseService {
 
   // Goal methods
   async getGoals(): Promise<Goal[]> {
-    return this.getAll<Goal>('goals');
+    if (!this.db) throw new Error('Database not initialized');
+    const rows = await this.db.getAllAsync<any>('SELECT * FROM goals');
+    return rows.map(row => ({
+      id: row.id,
+      title: row.title,
+      description: row.description,
+      subjectId: row.subject_id,
+      targetHours: row.target_hours,
+      currentHours: row.current_hours,
+      status: row.status,
+      deadline: row.deadline,
+      userId: row.user_id,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
   }
 
   async createGoal(data: Partial<Goal>): Promise<number> {
-    const id = await this.insert('goals', {
+    const goalData: Record<string, any> = {
       title: data.title,
       description: data.description,
       subject_id: data.subjectId,
@@ -398,9 +442,11 @@ class DatabaseService {
       status: data.status || 'active',
       deadline: data.deadline,
       user_id: data.userId,
-    });
+    };
 
-    await this.queueSync('goals', id, 'INSERT', data as any);
+    const id = await this.insert('goals', goalData);
+
+    await this.queueSync('goals', id, 'INSERT', goalData);
     return id;
   }
 
@@ -422,6 +468,11 @@ class DatabaseService {
 
     await this.update('goals', id, updateData);
     await this.queueSync('goals', id, 'UPDATE', updateData);
+  }
+
+  async deleteGoal(id: number): Promise<void> {
+    await this.delete('goals', id);
+    await this.queueSync('goals', id, 'DELETE', { id });
   }
 
   // Schedule slot methods
@@ -458,15 +509,17 @@ class DatabaseService {
   }
 
   async createScheduleSlot(data: Partial<ScheduleSlot>): Promise<number> {
-    const id = await this.insert('schedule_slots', {
+    const slotData: Record<string, any> = {
       day_of_week: data.dayOfWeek,
       start_time: data.startTime,
       end_time: data.endTime,
       subject_id: data.subjectId,
       is_active: data.isActive ? 1 : 0,
-    });
+    };
 
-    await this.queueSync('schedule_slots', id, 'INSERT', data as any);
+    const id = await this.insert('schedule_slots', slotData);
+
+    await this.queueSync('schedule_slots', id, 'INSERT', slotData);
     return id;
   }
 
@@ -489,23 +542,31 @@ class DatabaseService {
 
   // Reminder methods
   async getReminders(): Promise<Reminder[]> {
-    const reminders = await this.getAll<Reminder>('reminders');
-    return reminders.map(r => ({
-      ...r,
-      daysOfWeek: JSON.parse(r.daysOfWeek || '[]'),
+    if (!this.db) throw new Error('Database not initialized');
+    const rows = await this.db.getAllAsync<any>('SELECT * FROM reminders');
+    return rows.map(row => ({
+      id: row.id,
+      title: row.title,
+      subjectId: row.subject_id,
+      time: row.time,
+      daysOfWeek: JSON.parse(row.days_of_week || '[]') as number[],
+      isActive: Boolean(row.is_active),
+      createdAt: row.created_at,
     }));
   }
 
   async createReminder(data: Partial<Reminder>): Promise<number> {
-    const id = await this.insert('reminders', {
+    const reminderData: Record<string, any> = {
       title: data.title,
       subject_id: data.subjectId || null,
       time: data.time,
       days_of_week: JSON.stringify(data.daysOfWeek || []),
       is_active: data.isActive ? 1 : 0,
-    });
+    };
 
-    await this.queueSync('reminders', id, 'INSERT', data as any);
+    const id = await this.insert('reminders', reminderData);
+
+    await this.queueSync('reminders', id, 'INSERT', reminderData);
     return id;
   }
 
@@ -686,6 +747,120 @@ class DatabaseService {
     await this.db.runAsync('DELETE FROM sync_queue WHERE synced = 1');
   }
 
+  async clearAll(): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+    const tables = ['tasks', 'subjects', 'sessions', 'goals', 'schedule_slots', 'reminders', 'sync_queue', 'users'];
+    for (const table of tables) {
+      await this.db.runAsync(`DELETE FROM ${table}`);
+    }
+  }
+
+  // Generate recurring task instances from completed recurring tasks
+  async generateRecurringInstances(): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const today = new Date().toISOString().split('T')[0];
+
+    // Get all recurring tasks that are completed and have valid recurrence settings
+    const recurringTasks = await this.db.getAllAsync<any>(`
+      SELECT * FROM tasks
+      WHERE is_recurring = 1
+        AND status = 'completed'
+        AND (recurrence_end_date IS NULL OR recurrence_end_date >= ?)
+        AND recurrence_pattern IS NOT NULL
+        AND (completed_at IS NULL OR completed_at < ?)
+    `, [today, new Date().toISOString()]);
+
+    for (const task of recurringTasks) {
+      // Calculate next occurrence date
+      const lastDate = new Date(task.date + 'T00:00:00');
+      let nextDate = new Date(lastDate);
+
+      switch (task.recurrence_pattern) {
+        case 'daily':
+          nextDate.setDate(nextDate.getDate() + 1);
+          break;
+        case 'weekly':
+          nextDate.setDate(nextDate.getDate() + 7);
+          break;
+        case 'biweekly':
+          nextDate.setDate(nextDate.getDate() + 14);
+          break;
+        case 'monthly':
+          nextDate.setMonth(nextDate.getMonth() + 1);
+          break;
+        default:
+          continue;
+      }
+
+      const nextDateStr = nextDate.toISOString().split('T')[0];
+
+      // Check if next occurrence is within range
+      if (task.recurrence_end_date && nextDateStr > task.recurrence_end_date) {
+        continue;
+      }
+
+      // Check if instance already exists for this date
+      const existing = await this.db.getAllAsync<any>(
+        'SELECT id FROM tasks WHERE recurrence_parent_id = ? AND date = ?',
+        [task.id, nextDateStr]
+      );
+
+      if (existing.length > 0) {
+        continue;
+      }
+
+      // Create new task instance
+      await this.db.runAsync(`
+        INSERT INTO tasks (
+          title, description, subject_id, duration, priority, status,
+          date, time, notes, reminder, user_id, is_recurring,
+          recurrence_pattern, recurrence_end_date, recurrence_parent_id,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, 0, NULL, NULL, ?, datetime('now'))
+      `, [
+        task.title,
+        task.description,
+        task.subject_id,
+        task.duration,
+        task.priority,
+        nextDateStr,
+        task.time,
+        task.notes,
+        task.reminder,
+        task.user_id,
+        task.id
+      ]);
+
+      // Update original task's completed_at to prevent re-generation
+      await this.db.runAsync(
+        'UPDATE tasks SET completed_at = ? WHERE id = ?',
+        [new Date().toISOString(), task.id]
+      );
+    }
+  }
+
+  // Migration system
+  private async runMigrations(): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const result = await this.db.getAllAsync<{ version: number }>('SELECT version FROM db_version ORDER BY version DESC LIMIT 1');
+    const currentVersion = result[0]?.version || 0;
+
+    const migrations = [
+      // Version 1: Initial tables (already created in createTables)
+    ];
+
+    for (let i = currentVersion; i < migrations.length; i++) {
+      await migrations[i]();
+      await this.db.runAsync('INSERT OR REPLACE INTO db_version (version) VALUES (?)', [i + 1]);
+    }
+
+    if (currentVersion === 0) {
+      await this.db.runAsync('INSERT INTO db_version (version) VALUES (1)');
+    }
+  }
+
   // Helper: Map DB row to Task type
   private mapTaskFromDb(row: any): Task {
     return {
@@ -706,6 +881,9 @@ class DatabaseService {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       completedAt: row.completed_at,
+      isRecurring: Boolean(row.is_recurring),
+      recurrencePattern: row.recurrence_pattern || null,
+      recurrenceEndDate: row.recurrence_end_date || null,
     };
   }
 

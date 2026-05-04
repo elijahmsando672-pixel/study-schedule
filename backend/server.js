@@ -8,6 +8,12 @@ const taskRoutes = require('./routes/tasks');
 const statsRoutes = require('./routes/stats');
 const goalRoutes = require('./routes/goals');
 const syncRoutes = require('./routes/sync');
+const dashboardRoutes = require('./routes/dashboard');
+const progressRoutes = require('./routes/progress');
+const scheduleSlotRoutes = require('./routes/scheduleSlots');
+const reminderRoutes = require('./routes/reminders');
+const subjectRoutes = require('./routes/subjects');
+const sessionRoutes = require('./routes/sessions');
 
 const app = express();
 
@@ -19,6 +25,12 @@ app.use('/api/tasks', taskRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/goals', goalRoutes);
 app.use('/api/sync', syncRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/progress', progressRoutes);
+app.use('/api/schedule-slots', scheduleSlotRoutes);
+app.use('/api/reminders', reminderRoutes);
+app.use('/api/subjects', subjectRoutes);
+app.use('/api/sessions', sessionRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Study Schedule API is running' });

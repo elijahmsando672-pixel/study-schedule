@@ -159,10 +159,54 @@ router.post('/:id/complete', async (req, res) => {
       completedAt: new Date()
     });
 
+    if (task.isRecurring && task.recurrencePattern) {
+      const nextDate = getNextRecurrenceDate(task.date, task.recurrencePattern);
+      const endDate = task.recurrenceEndDate;
+
+      if (!endDate || nextDate <= endDate) {
+        await Task.create({
+          userId: task.userId,
+          title: task.title,
+          subject: task.subject,
+          description: task.description,
+          date: nextDate,
+          startTime: task.startTime,
+          endTime: task.endTime,
+          duration: task.duration,
+          priority: task.priority,
+          status: 'pending',
+          notes: task.notes,
+          isRecurring: true,
+          recurrencePattern: task.recurrencePattern,
+          recurrenceEndDate: task.recurrenceEndDate,
+          recurrenceParentId: task.id,
+        });
+      }
+    }
+
     res.json(task);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
+
+function getNextRecurrenceDate(currentDate, pattern) {
+  const date = new Date(currentDate);
+  switch (pattern) {
+    case 'daily':
+      date.setDate(date.getDate() + 1);
+      break;
+    case 'weekly':
+      date.setDate(date.getDate() + 7);
+      break;
+    case 'biweekly':
+      date.setDate(date.getDate() + 14);
+      break;
+    case 'monthly':
+      date.setMonth(date.getMonth() + 1);
+      break;
+  }
+  return date.toISOString().split('T')[0];
+}
 
 module.exports = router;

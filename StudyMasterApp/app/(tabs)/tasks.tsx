@@ -10,15 +10,21 @@ import {
   Alert,
   FlatList,
   SafeAreaView,
+  Pressable,
+  Platform,
+  RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
-import { CheckCircle, Plus, Clock, Calendar, Target, Flame, BarChart3, Edit, Trash2 } from 'lucide-react-native';
+import { CheckCircle, Plus, Clock, Calendar, Target, Flame, Edit, Trash2, Repeat, Search, X } from 'lucide-react-native';
 import { useStore } from '@/store/useStore';
-import { dbService } from '@/services/database';
-import { Priority, TaskStatus } from '@/types';
+import { Priority, TaskStatus, RecurrencePattern } from '@/types';
+import { useAppTheme } from '@/hooks/use-app-theme';
 
 export default function TasksScreen() {
   const router = useRouter();
+  const theme = useAppTheme();
   const {
     tasks,
     subjects,
@@ -28,11 +34,20 @@ export default function TasksScreen() {
     updateTask,
     deleteTask,
     completeTask,
+    isLoading,
   } = useStore();
 
-  const [filter, setFilter] = useState<'all' | 'pending' | 'completed' | 'high'>('all');
+const [filter, setFilter] = useState<'all' | 'pending' | 'completed' | 'high'>('all');
+const [searchQuery, setSearchQuery] = useState('');
+const [refreshing, setRefreshing] = useState(false);
+const [groupedByDate, setGroupedByDate] = useState(false);
+const [sortBy, setSortBy] = useState<'date' | 'priority' | 'created'>('date');
   const [showModal, setShowModal] = useState(false);
-  const [editingTask, setEditingTask] = useState(null);
+  const [editingTask, setEditingTask] = useState<any>(null);
+  const [showRecurrenceOptions, setShowRecurrenceOptions] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [showEndDatePicker, setShowEndDatePicker] = useState(false);
   const [newTask, setNewTask] = useState({
     title: '',
     description: '',
@@ -43,6 +58,9 @@ export default function TasksScreen() {
     time: '',
     notes: '',
     reminder: '',
+    isRecurring: false,
+    recurrencePattern: '' as RecurrencePattern | '',
+    recurrenceEndDate: '',
   });
 
   useEffect(() => {
@@ -67,6 +85,9 @@ export default function TasksScreen() {
         date: newTask.date,
         time: newTask.time || undefined,
         notes: newTask.notes || undefined,
+        isRecurring: newTask.isRecurring,
+        recurrencePattern: newTask.isRecurring && newTask.recurrencePattern ? newTask.recurrencePattern : null,
+        recurrenceEndDate: newTask.isRecurring && newTask.recurrenceEndDate ? newTask.recurrenceEndDate : null,
       });
 
       resetForm();
@@ -126,7 +147,7 @@ export default function TasksScreen() {
     ]);
   };
 
-  const handleEdit = (task) => {
+  const handleEdit = (task: any) => {
     setEditingTask(task);
     setNewTask({
       title: task.title,
@@ -138,6 +159,9 @@ export default function TasksScreen() {
       time: task.time || '',
       notes: task.notes || '',
       reminder: task.reminder || '',
+      isRecurring: task.isRecurring || false,
+      recurrencePattern: task.recurrencePattern || '',
+      recurrenceEndDate: task.recurrenceEndDate || '',
     });
     setShowModal(true);
   };
@@ -153,29 +177,59 @@ export default function TasksScreen() {
       time: '',
       notes: '',
       reminder: '',
+      isRecurring: false,
+      recurrencePattern: '',
+      recurrenceEndDate: '',
     });
     setShowModal(false);
+    setShowRecurrenceOptions(false);
+  };
+
+  const handleLongPressDelete = (task: any) => {
+    handleDelete(task.id);
   };
 
   const filteredTasks = tasks.filter((task) => {
-    switch (filter) {
-      case 'pending':
-        return task.status === 'pending' || task.status === 'in-progress';
-      case 'completed':
-        return task.status === 'completed';
-      case 'high':
-        return task.priority === 'high' && task.status !== 'completed';
-      default:
-        return true;
-    }
+    const matchesFilter = (() => {
+      switch (filter) {
+        case 'pending':
+          return task.status === 'pending' || task.status === 'in-progress';
+        case 'completed':
+          return task.status === 'completed';
+        case 'high':
+          return task.priority === 'high' && task.status !== 'completed';
+        default:
+          return true;
+      }
+    })();
+    const q = searchQuery.toLowerCase();
+    const matchesSearch = !q || task.title.toLowerCase().includes(q) || task.description?.toLowerCase().includes(q);
+    return matchesFilter && matchesSearch;
   });
+
+  const filteredSorted = [...filteredTasks].sort((a, b) => {
+    if (sortBy === 'date') return (a.date || '').localeCompare(b.date || '');
+    if (sortBy === 'priority') {
+      const order = { high: 0, medium: 1, low: 2 };
+      return (order[a.priority] || 1) - (order[b.priority] || 1);
+    }
+    return (b.createdAt || '').localeCompare(a.createdAt || '');
+  });
+
+  const today = new Date().toISOString().split('T')[0];
+  const groupedTasks = groupedByDate ? {
+    today: filteredSorted.filter(t => t.date === today && t.status !== 'completed'),
+    upcoming: filteredSorted.filter(t => t.date > today && t.status !== 'completed'),
+    overdue: filteredSorted.filter(t => t.date < today && t.status !== 'completed'),
+    completed: filteredSorted.filter(t => t.status === 'completed'),
+  } : null;
 
   const getSubject = (id?: number) => subjects.find((s) => s.id === id);
 
   const priorityColors: Record<Priority, string> = {
-    low: '#22c55e',
-    medium: '#f59e0b',
-    high: '#ef4444',
+    low: theme.success,
+    medium: theme.warning,
+    high: theme.danger,
   };
 
   const renderTask = ({ item: task }: { item: any }) => {
@@ -183,7 +237,11 @@ export default function TasksScreen() {
     const isCompleted = task.status === 'completed';
 
     return (
-      <View style={[styles.taskCard, isCompleted && styles.taskCardCompleted]}>
+      <Pressable
+        style={[styles.taskCard, { backgroundColor: theme.backgroundSecondary }, isCompleted && { opacity: 0.6 }]}
+        onLongPress={() => handleLongPressDelete(task)}
+        delayLongPress={500}
+      >
         <View style={styles.taskMain}>
           <TouchableOpacity
             style={styles.checkBtn}
@@ -191,13 +249,13 @@ export default function TasksScreen() {
           >
             <CheckCircle
               size={24}
-              color={isCompleted ? '#22c55e' : '#d1d5db'}
-              fill={isCompleted ? '#22c55e' : 'transparent'}
+              color={isCompleted ? theme.success : theme.border}
+              fill={isCompleted ? theme.success : 'transparent'}
             />
           </TouchableOpacity>
 
           <View style={styles.taskInfo}>
-            <Text style={[styles.taskTitle, isCompleted && styles.taskTitleCompleted]}>
+            <Text style={[styles.taskTitle, { color: theme.text }, isCompleted && { textDecorationLine: 'line-through', color: theme.textTertiary }]}>
               {task.title}
             </Text>
             <View style={styles.taskMeta}>
@@ -211,51 +269,56 @@ export default function TasksScreen() {
               <View style={[styles.priorityBadge, { backgroundColor: priorityColors[task.priority] }]}>
                 <Text style={styles.priorityBadgeText}>{task.priority}</Text>
               </View>
+              {task.isRecurring && (
+                <View style={[styles.recurringBadge, { backgroundColor: theme.primaryLight }]}>
+                  <Repeat size={12} color={theme.primary} />
+                  <Text style={[styles.recurringText, { color: theme.primary }]}>{task.recurrencePattern || 'recurring'}</Text>
+                </View>
+              )}
               {task.time && (
                 <View style={styles.metaItem}>
-                  <Clock size={12} color="#64748b" />
-                  <Text style={styles.metaText}>{task.time}</Text>
+                  <Clock size={12} color={theme.textSecondary} />
+                  <Text style={[styles.metaText, { color: theme.textSecondary }]}>{task.time}</Text>
                 </View>
               )}
               {task.date && (
                 <View style={styles.metaItem}>
-                  <Calendar size={12} color="#64748b" />
-                  <Text style={styles.metaText}>{task.date}</Text>
+                  <Calendar size={12} color={theme.textSecondary} />
+                  <Text style={[styles.metaText, { color: theme.textSecondary }]}>{task.date}</Text>
                 </View>
               )}
             </View>
           </View>
 
           <View style={styles.taskDuration}>
-            <Clock size={14} color="#64748b" />
-            <Text style={styles.durationText}>{task.duration}m</Text>
+            <Clock size={14} color={theme.textSecondary} />
+            <Text style={[styles.durationText, { color: theme.textSecondary }]}>{task.duration}m</Text>
           </View>
 
           <View style={styles.taskActions}>
             {!isCompleted && (
               <TouchableOpacity
-                style={[styles.actionBtn, styles.actionBtnStart]}
+                style={[styles.actionBtn, { backgroundColor: theme.successLight }]}
                 onPress={() => handleComplete(task.id)}
-                title="Mark as started"
               >
-                <Target size={14} color="#22c55e" />
+                <Target size={14} color={theme.success} />
               </TouchableOpacity>
             )}
             <TouchableOpacity
-              style={[styles.actionBtn, styles.actionBtnEdit]}
+              style={[styles.actionBtn, { backgroundColor: theme.infoLight }]}
               onPress={() => handleEdit(task)}
             >
-              <Edit size={14} color="#3b82f6" />
+              <Edit size={14} color={theme.info} />
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.actionBtn, styles.actionBtnDelete]}
+              style={[styles.actionBtn, { backgroundColor: theme.dangerLight }]}
               onPress={() => handleDelete(task.id)}
             >
-              <Trash2 size={14} color="#ef4444" />
+              <Trash2 size={14} color={theme.danger} />
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </Pressable>
     );
   };
 
@@ -278,6 +341,25 @@ export default function TasksScreen() {
           <Plus size={18} color="#fff" />
           <Text style={styles.addBtnText}>New Task</Text>
         </TouchableOpacity>
+      </View>
+
+      {/* Search */}
+      <View style={styles.searchRow}>
+        <View style={styles.searchBox}>
+          <Search size={16} color="#64748b" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search tasks..."
+            placeholderTextColor="#94a3b8"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <X size={16} color="#64748b" />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       {/* Stats */}
@@ -313,27 +395,58 @@ export default function TasksScreen() {
             </Text>
           </TouchableOpacity>
         ))}
+        <TouchableOpacity
+          style={[styles.filterBtn, groupedByDate && styles.filterBtnActive]}
+          onPress={() => setGroupedByDate(!groupedByDate)}
+        >
+          <Text style={[styles.filterBtnText, groupedByDate && styles.filterBtnTextActive]}>Group</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.sortBtn, { backgroundColor: theme.backgroundSecondary }]} onPress={() => {
+          const order: ('date' | 'priority' | 'created')[] = ['date', 'priority', 'created'];
+          setSortBy(order[(order.indexOf(sortBy) + 1) % 3]);
+        }}>
+          <Text style={styles.sortBtnText}>{sortBy === 'date' ? 'By Date' : sortBy === 'priority' ? 'By Priority' : 'By Created'}</Text>
+        </TouchableOpacity>
       </View>
 
+      {isLoading && tasks.length === 0 && (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#6366F1" />
+          <Text style={styles.loadingText}>Loading tasks...</Text>
+        </View>
+      )}
+
       {/* Task List */}
-      <FlatList
-        data={filteredTasks}
-        renderItem={renderTask}
-        keyExtractor={(item) => item.id.toString()}
-        contentContainerStyle={styles.taskList}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Target size={48} color="#94a3b8" />
-            <Text style={styles.emptyTitle}>No tasks yet</Text>
-            <Text style={styles.emptyText}>
-              Create your first task to start tracking your study progress.
-            </Text>
-            <TouchableOpacity style={styles.emptyBtn} onPress={() => setShowModal(true)}>
-              <Text style={styles.emptyBtnText}>Add Task</Text>
-            </TouchableOpacity>
-          </View>
-        }
-      />
+      {groupedByDate && groupedTasks ? (
+        <ScrollView refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadTasks().then(() => setRefreshing(false)); }} } contentContainerStyle={styles.taskList}>
+          {Object.entries(groupedTasks).map(([key, tasks]) => tasks.length > 0 && (
+            <View key={key}>
+              <Text style={styles.sectionHeader}>{key.charAt(0).toUpperCase() + key.slice(1)} ({tasks.length})</Text>
+              {tasks.map(task => renderTask({ item: task }))}
+            </View>
+          ))}
+        </ScrollView>
+      ) : (
+        <FlatList
+          data={filteredSorted}
+          renderItem={renderTask}
+          keyExtractor={(item) => item.id.toString()}
+          contentContainerStyle={styles.taskList}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadTasks().then(() => setRefreshing(false)); }} />}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Target size={48} color="#94a3b8" />
+              <Text style={styles.emptyTitle}>No tasks yet</Text>
+              <Text style={styles.emptyText}>
+                Create your first task to start tracking your study progress.
+              </Text>
+              <TouchableOpacity style={styles.emptyBtn} onPress={() => setShowModal(true)}>
+                <Text style={styles.emptyBtnText}>Add Task</Text>
+              </TouchableOpacity>
+            </View>
+          }
+        />
+      )}
 
       {/* Modal */}
       <Modal visible={showModal} animationType="slide" transparent>
@@ -439,22 +552,41 @@ export default function TasksScreen() {
               <View style={styles.formRow}>
                 <View style={[styles.formGroup, styles.halfWidth]}>
                   <Text style={styles.label}>Date</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="YYYY-MM-DD"
-                    value={newTask.date}
-                    onChangeText={(text) => setNewTask({ ...newTask, date: text })}
-                  />
+                  <TouchableOpacity style={styles.input} onPress={() => setShowDatePicker(true)}>
+                    <Text style={{ color: newTask.date ? '#0f172a' : '#94a3b8' }}>{newTask.date || 'YYYY-MM-DD'}</Text>
+                  </TouchableOpacity>
+                  {showDatePicker && (
+                    <DateTimePicker
+                      value={newTask.date ? new Date(newTask.date) : new Date()}
+                      mode="date"
+                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                      onChange={(event, date) => {
+                        setShowDatePicker(false);
+                        if (date) setNewTask({ ...newTask, date: date.toISOString().split('T')[0] });
+                      }}
+                    />
+                  )}
                 </View>
 
                 <View style={[styles.formGroup, styles.halfWidth]}>
                   <Text style={styles.label}>Time</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="HH:MM"
-                    value={newTask.time}
-                    onChangeText={(text) => setNewTask({ ...newTask, time: text })}
-                  />
+                  <TouchableOpacity style={styles.input} onPress={() => setShowTimePicker(true)}>
+                    <Text style={{ color: newTask.time ? '#0f172a' : '#94a3b8' }}>{newTask.time || 'HH:MM'}</Text>
+                  </TouchableOpacity>
+                  {showTimePicker && (
+                    <DateTimePicker
+                      value={newTask.time ? new Date(`2000-01-01T${newTask.time}`) : new Date()}
+                      mode="time"
+                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                      onChange={(event, date) => {
+                        setShowTimePicker(false);
+                        if (date) {
+                          const t = date.toTimeString().slice(0, 5);
+                          setNewTask({ ...newTask, time: t });
+                        }
+                      }}
+                    />
+                  )}
                 </View>
               </View>
 
@@ -468,6 +600,60 @@ export default function TasksScreen() {
                   multiline
                   numberOfLines={3}
                 />
+              </View>
+
+              <View style={styles.formGroup}>
+                <TouchableOpacity
+                  style={styles.recurrenceToggle}
+                  onPress={() => setShowRecurrenceOptions(!showRecurrenceOptions)}
+                >
+                  <Repeat size={18} color={newTask.isRecurring ? theme.primary : theme.textSecondary} />
+                  <Text style={[styles.recurrenceToggleText, { color: theme.text }]}>
+                    Repeat this task
+                  </Text>
+                  <View style={[styles.recurrenceSwitch, { backgroundColor: newTask.isRecurring ? theme.primary : theme.backgroundTertiary }]}>
+                    <View style={[styles.recurrenceKnob, { backgroundColor: '#fff', transform: [{ translateX: newTask.isRecurring ? 18 : 0 }] }]} />
+                  </View>
+                </TouchableOpacity>
+
+                {showRecurrenceOptions && (
+                  <View style={styles.recurrenceOptions}>
+                    {(['daily', 'weekly', 'biweekly', 'monthly'] as RecurrencePattern[]).map((pattern) => (
+                      <TouchableOpacity
+                        key={pattern}
+                        style={[
+                          styles.recurrencePatternBtn,
+                          { backgroundColor: theme.backgroundTertiary },
+                          newTask.recurrencePattern === pattern && { backgroundColor: theme.primaryLight, borderColor: theme.primary }
+                        ]}
+                        onPress={() => setNewTask({ ...newTask, isRecurring: true, recurrencePattern: pattern })}
+                      >
+                        <Text style={[styles.recurrencePatternText, { color: theme.text }, newTask.recurrencePattern === pattern && { color: theme.primary, fontWeight: '600' }]}>
+                          {pattern.charAt(0).toUpperCase() + pattern.slice(1)}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                    <View style={styles.formRow}>
+                       <View style={[styles.formGroup, styles.halfWidth]}>
+                         <Text style={styles.label}>End Date (optional)</Text>
+                         <TouchableOpacity style={styles.input} onPress={() => setShowEndDatePicker(true)}>
+                           <Text style={{ color: newTask.recurrenceEndDate ? '#0f172a' : '#94a3b8' }}>{newTask.recurrenceEndDate || 'YYYY-MM-DD'}</Text>
+                         </TouchableOpacity>
+                         {showEndDatePicker && (
+                           <DateTimePicker
+                             value={newTask.recurrenceEndDate ? new Date(newTask.recurrenceEndDate) : new Date()}
+                             mode="date"
+                             display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                             onChange={(event, date) => {
+                               setShowEndDatePicker(false);
+                               if (date) setNewTask({ ...newTask, recurrenceEndDate: date.toISOString().split('T')[0] });
+                             }}
+                           />
+                         )}
+                       </View>
+                     </View>
+                  </View>
+                )}
               </View>
 
               <View style={styles.modalActions}>
@@ -503,6 +689,9 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 28, fontWeight: 'bold', color: '#0f172a' },
   subtitle: { fontSize: 14, color: '#64748b', marginTop: 4 },
+  searchRow: { paddingHorizontal: 20, marginBottom: 16 },
+  searchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10 },
+  searchInput: { flex: 1, fontSize: 14, color: '#0f172a' },
   addBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -543,6 +732,11 @@ const styles = StyleSheet.create({
   filterBtnTextActive: { color: '#fff' },
 
   taskList: { paddingHorizontal: 20, paddingBottom: 20 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
+  loadingText: { fontSize: 14, color: '#64748b', marginTop: 12 },
+  sectionHeader: { fontSize: 16, fontWeight: '600', color: '#64748b', marginBottom: 8, marginTop: 16, textTransform: 'uppercase' },
+  sortBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20 },
+  sortBtnText: { fontSize: 13, color: '#64748b', fontWeight: '500' },
   taskCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -577,6 +771,15 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   priorityBadgeText: { fontSize: 11, color: '#fff', fontWeight: '600', textTransform: 'uppercase' },
+  recurringBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  recurringText: { fontSize: 11, fontWeight: '500', textTransform: 'capitalize' },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   metaText: { fontSize: 12, color: '#64748b' },
   taskDuration: { flexDirection: 'row', alignItems: 'center', gap: 4 },
@@ -700,4 +903,12 @@ const styles = StyleSheet.create({
   },
   saveBtnDisabled: { backgroundColor: '#94a3b8' },
   saveBtnText: { color: '#fff', fontWeight: '600' },
+
+  recurrenceToggle: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12 },
+  recurrenceToggleText: { flex: 1, fontSize: 14, fontWeight: '500' },
+  recurrenceSwitch: { width: 44, height: 24, borderRadius: 12, padding: 2 },
+  recurrenceKnob: { width: 20, height: 20, borderRadius: 10 },
+  recurrenceOptions: { marginTop: 8, gap: 8 },
+  recurrencePatternBtn: { paddingVertical: 10, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: 'transparent' },
+  recurrencePatternText: { fontSize: 14 },
 });

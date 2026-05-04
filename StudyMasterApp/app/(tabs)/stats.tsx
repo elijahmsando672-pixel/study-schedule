@@ -1,9 +1,57 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, SafeAreaView } from 'react-native';
-import { BarChart3, Target, Trophy, TrendingUp, Calendar, Clock, Flame } from 'lucide-react-native';
+import { View, Text, StyleSheet, ScrollView, SafeAreaView, TouchableOpacity, Share } from 'react-native';
+import { BarChart3, Target, Trophy, TrendingUp, Calendar, Clock, Flame, Download, Award, Lock } from 'lucide-react-native';
 import { useStore } from '@/store/useStore';
+import { useAppTheme } from '@/hooks/use-app-theme';
+
+const BADGES = [
+  { id: 'first_session', name: 'First Steps', desc: 'Complete your first study session', icon: '1', check: (sessions: any[]) => sessions.length >= 1 },
+  { id: 'five_sessions', name: 'Getting Started', desc: 'Complete 5 study sessions', icon: '5', check: (sessions: any[]) => sessions.length >= 5 },
+  { id: 'ten_hours', name: 'Dedicated', desc: 'Study for 10 hours total', icon: '10', check: (_: any[], totalHours: number) => totalHours >= 10 },
+  { id: 'streak_3', name: 'On Fire', desc: '3-day study streak', icon: '3', check: (_: any[], __: number, streak: number) => streak >= 3 },
+  { id: 'streak_7', name: 'Week Warrior', desc: '7-day study streak', icon: '7', check: (_: any[], __: number, streak: number) => streak >= 7 },
+  { id: 'streak_30', name: 'Monthly Master', desc: '30-day study streak', icon: '30', check: (_: any[], __: number, streak: number) => streak >= 30 },
+  { id: 'perfect_day', name: 'Perfect Day', desc: 'Complete all tasks in a day', icon: '*', check: (sessions: any[], _: number, __: number, tasks: any[]) => {
+    const today = new Date().toISOString().split('T')[0];
+    const todayTasks = tasks.filter((t: any) => t.date === today);
+    return todayTasks.length > 0 && todayTasks.every((t: any) => t.status === 'completed');
+  }},
+  { id: 'five_subjects', name: 'Scholar', desc: 'Add 5 subjects', icon: 'S', check: (_: any[], __: number, ___: number, ___: any[], subjects: any[]) => subjects.length >= 5 },
+  { id: 'hundred_hours', name: 'Century', desc: 'Study for 100 hours total', icon: '100', check: (_: any[], totalHours: number) => totalHours >= 100 },
+];
+
+function getEarnedBadges(sessions: any[], totalHours: number, streak: number, tasks: any[], subjects: any[]) {
+  return BADGES.map(badge => ({
+    ...badge,
+    earned: badge.check(sessions, totalHours, streak, tasks, subjects),
+  }));
+}
+
+async function exportCSV(sessions: any[], totalHours: number, completionRate: number, streak: number) {
+  const headers = 'Date,Subject,Duration (min),Notes';
+  const rows = sessions.map(s => `${s.date},${s.subjectName || 'Unknown'},${s.duration},"${(s.notes || '').replace(/"/g, '""')}"`);
+  const summary = [
+    '',
+    'Summary',
+    `Total Hours,${totalHours}`,
+    `Completion Rate,${completionRate}%`,
+    `Streak,${streak} days`,
+  ];
+
+  const csv = [headers, ...rows, ...summary].join('\n');
+
+  try {
+    await Share.share({
+      message: csv,
+      title: 'Study Stats Export',
+    });
+  } catch (error) {
+    console.error('Error sharing CSV:', error);
+  }
+}
 
 export default function StatsScreen() {
+  const theme = useAppTheme();
   const { tasks, sessions, goals, weeklyProgress, subjectProgress, loadTasks, loadSessions, loadGoals, loadDashboardData } = useStore();
 
   useEffect(() => {
@@ -53,221 +101,265 @@ export default function StatsScreen() {
     return streak;
   }
 
-  const getSubjectColor = (color?: string) => color || '#6366F1';
+  const earnedBadges = getEarnedBadges(sessions, totalHours, streak, tasks, useStore.getState().subjects);
+
+  const handleExport = () => {
+    exportCSV(sessions, totalHours, completionRate, streak);
+  };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
       <ScrollView>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.title}>Statistics</Text>
-        <Text style={styles.subtitle}>Your learning journey</Text>
-      </View>
-
-      {/* Summary Cards */}
-      <View style={styles.summaryGrid}>
-        <View style={styles.summaryCard}>
-          <View style={[styles.iconBox, { backgroundColor: '#dbeafe' }]}>
-            <Target size={24} color="#3b82f6" />
+        {/* Header */}
+        <View style={[styles.header, { backgroundColor: theme.backgroundSecondary, borderBottomColor: theme.border }]}>
+          <View>
+            <Text style={[styles.title, { color: theme.text }]}>Statistics</Text>
+            <Text style={[styles.subtitle, { color: theme.textSecondary }]}>Your learning journey</Text>
           </View>
-          <Text style={styles.summaryValue}>{tasks.length}</Text>
-          <Text style={styles.summaryLabel}>Total Tasks</Text>
+          <TouchableOpacity style={styles.exportBtn} onPress={handleExport}>
+            <Download size={20} color={theme.primary} />
+          </TouchableOpacity>
         </View>
 
-        <View style={styles.summaryCard}>
-          <View style={[styles.iconBox, { backgroundColor: '#dcfce7' }]}>
-            <Trophy size={24} color="#22c55e" />
+        {/* Summary Cards */}
+        <View style={styles.summaryGrid}>
+          <View style={[styles.summaryCard, { backgroundColor: theme.backgroundSecondary }]}>
+            <View style={[styles.iconBox, { backgroundColor: `${theme.info}20` }]}>
+              <Target size={24} color={theme.info} />
+            </View>
+            <Text style={[styles.summaryValue, { color: theme.text }]}>{tasks.length}</Text>
+            <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>Total Tasks</Text>
           </View>
-          <Text style={styles.summaryValue}>{completedTasks.length}</Text>
-          <Text style={styles.summaryLabel}>Completed</Text>
-        </View>
 
-        <View style={styles.summaryCard}>
-          <View style={[styles.iconBox, { backgroundColor: '#fef3c7' }]}>
-            <Clock size={24} color="#f59e0b" />
+          <View style={[styles.summaryCard, { backgroundColor: theme.backgroundSecondary }]}>
+            <View style={[styles.iconBox, { backgroundColor: `${theme.success}20` }]}>
+              <Trophy size={24} color={theme.success} />
+            </View>
+            <Text style={[styles.summaryValue, { color: theme.text }]}>{completedTasks.length}</Text>
+            <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>Completed</Text>
           </View>
-          <Text style={styles.summaryValue}>{totalHours}h</Text>
-          <Text style={styles.summaryLabel}>Time Studied</Text>
-        </View>
 
-        <View style={styles.summaryCard}>
-          <View style={[styles.iconBox, { backgroundColor: '#fee2e2' }]}>
-            <Flame size={24} color="#ef4444" />
+          <View style={[styles.summaryCard, { backgroundColor: theme.backgroundSecondary }]}>
+            <View style={[styles.iconBox, { backgroundColor: `${theme.warning}20` }]}>
+              <Clock size={24} color={theme.warning} />
+            </View>
+            <Text style={[styles.summaryValue, { color: theme.text }]}>{totalHours}h</Text>
+            <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>Time Studied</Text>
           </View>
-          <Text style={styles.summaryValue}>{streak}</Text>
-          <Text style={styles.summaryLabel}>Day Streak</Text>
-        </View>
-      </View>
 
-      {/* Progress Section */}
-      <View style={styles.card}>
-        <View style={styles.cardHeader}>
-          <Text style={styles.cardTitle}>Overall Progress</Text>
-          <Text style={styles.cardValue}>{completionRate}%</Text>
+          <View style={[styles.summaryCard, { backgroundColor: theme.backgroundSecondary }]}>
+            <View style={[styles.iconBox, { backgroundColor: `${theme.danger}20` }]}>
+              <Flame size={24} color={theme.danger} />
+            </View>
+            <Text style={[styles.summaryValue, { color: theme.text }]}>{streak}</Text>
+            <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>Day Streak</Text>
+          </View>
         </View>
-        <View style={styles.progressBar}>
-          <View style={[styles.progressFill, { width: `${completionRate}%` }]} />
-        </View>
-        <Text style={styles.cardSubtitle}>
-          {completedTasks.length} of {tasks.length} tasks completed
-        </Text>
-      </View>
 
-      {/* Weekly Progress */}
-      <View style={styles.card}>
-        <View style={styles.cardHeader}>
-          <BarChart3 size={20} color="#6366F1" />
-          <Text style={styles.cardTitle}>Weekly Activity</Text>
+        {/* Progress Section */}
+        <View style={[styles.card, { backgroundColor: theme.backgroundSecondary }]}>
+          <View style={styles.cardHeader}>
+            <Text style={[styles.cardTitle, { color: theme.text }]}>Overall Progress</Text>
+            <Text style={[styles.cardValue, { color: theme.primary }]}>{completionRate}%</Text>
+          </View>
+          <View style={[styles.progressBar, { backgroundColor: theme.backgroundTertiary }]}>
+            <View style={[styles.progressFill, { width: `${completionRate}%`, backgroundColor: theme.primary }]} />
+          </View>
+          <Text style={[styles.cardSubtitle, { color: theme.textSecondary }]}>
+            {completedTasks.length} of {tasks.length} tasks completed
+          </Text>
         </View>
-        {weeklyProgress.length > 0 ? (
-          <View style={styles.chartContainer}>
-            {weeklyProgress.map((day, index) => {
-              const maxMinutes = Math.max(...weeklyProgress.map((d) => d.minutes), 1);
-              const height = (day.minutes / maxMinutes) * 120;
 
-              return (
-                <View key={index} style={styles.chartBarContainer}>
-                  <View style={styles.chartBarWrapper}>
+        {/* Weekly Progress */}
+        <View style={[styles.card, { backgroundColor: theme.backgroundSecondary }]}>
+          <View style={styles.cardHeader}>
+            <BarChart3 size={20} color={theme.primary} />
+            <Text style={[styles.cardTitle, { color: theme.text }]}>Weekly Activity</Text>
+          </View>
+          {weeklyProgress.length > 0 ? (
+            <View style={styles.chartContainer}>
+              {weeklyProgress.map((day, index) => {
+                const maxMinutes = Math.max(...weeklyProgress.map((d) => d.minutes), 1);
+                const height = (day.minutes / maxMinutes) * 120;
+
+                return (
+                  <View key={index} style={styles.chartBarContainer}>
+                    <View style={styles.chartBarWrapper}>
+                      <View
+                        style={[
+                          styles.chartBar,
+                          {
+                            height: Math.max(height, 4),
+                            backgroundColor: index === 6 ? theme.success : theme.info,
+                          },
+                        ]}
+                      />
+                    </View>
+                    <Text style={[styles.chartLabel, { color: theme.textSecondary }]}>{day.dayLabel}</Text>
+                    <Text style={[styles.chartValue, { color: theme.textTertiary }]}>{Math.round(day.minutes / 60)}h</Text>
+                  </View>
+                );
+              })}
+            </View>
+          ) : (
+            <Text style={[styles.noDataText, { color: theme.textTertiary }]}>No activity this week</Text>
+          )}
+        </View>
+
+        {/* Subject Breakdown */}
+        <View style={[styles.card, { backgroundColor: theme.backgroundSecondary }]}>
+          <View style={styles.cardHeader}>
+            <TrendingUp size={20} color={theme.primary} />
+            <Text style={[styles.cardTitle, { color: theme.text }]}>By Subject</Text>
+          </View>
+          {subjectProgress.length > 0 ? (
+            <View style={styles.subjectList}>
+              {subjectProgress.map((subject, index) => (
+                <View key={index} style={styles.subjectItem}>
+                  <View style={styles.subjectInfo}>
+                    <View style={[styles.subjectDot, { backgroundColor: subject.color }]} />
+                    <Text style={[styles.subjectName, { color: theme.text }]}>{subject.subjectName}</Text>
+                  </View>
+                  <View style={styles.subjectStats}>
+                    <Text style={[styles.subjectHours, { color: theme.textSecondary }]}>
+                      {Math.round(subject.minutesThisWeek / 60)}h / {Math.round(subject.goalMinutesPerWeek / 60)}h
+                    </Text>
+                    <Text style={[styles.subjectPercent, { color: theme.text }]}>{subject.percent}%</Text>
+                  </View>
+                  <View style={[styles.progressBarSmall, { backgroundColor: theme.backgroundTertiary }]}>
                     <View
                       style={[
-                        styles.chartBar,
+                        styles.progressFillSmall,
                         {
-                          height: Math.max(height, 4),
-                          backgroundColor: index === 6 ? '#10b981' : '#6366F1',
+                          width: `${subject.percent}%`,
+                          backgroundColor: subject.color,
                         },
                       ]}
                     />
                   </View>
-                  <Text style={styles.chartLabel}>{day.dayLabel}</Text>
-                  <Text style={styles.chartValue}>{Math.round(day.minutes / 60)}h</Text>
                 </View>
-              );
-            })}
-          </View>
-        ) : (
-          <Text style={styles.noDataText}>No activity this week</Text>
-        )}
-      </View>
-
-      {/* Subject Breakdown */}
-      <View style={styles.card}>
-        <View style={styles.cardHeader}>
-          <TrendingUp size={20} color="#6366F1" />
-          <Text style={styles.cardTitle}>By Subject</Text>
+              ))}
+            </View>
+          ) : (
+            <Text style={[styles.noDataText, { color: theme.textTertiary }]}>No subjects yet</Text>
+          )}
         </View>
-        {subjectProgress.length > 0 ? (
-          <View style={styles.subjectList}>
-            {subjectProgress.map((subject, index) => (
-              <View key={index} style={styles.subjectItem}>
-                <View style={styles.subjectInfo}>
-                  <View style={[styles.subjectDot, { backgroundColor: subject.color }]} />
-                  <Text style={styles.subjectName}>{subject.subjectName}</Text>
-                </View>
-                <View style={styles.subjectStats}>
-                  <Text style={styles.subjectHours}>
-                    {Math.round(subject.minutesThisWeek / 60)}h / {Math.round(subject.goalMinutesPerWeek / 60)}h
-                  </Text>
-                  <Text style={styles.subjectPercent}>{subject.percent}%</Text>
-                </View>
-                <View style={styles.progressBarSmall}>
-                  <View
-                    style={[
-                      styles.progressFillSmall,
-                      {
-                        width: `${subject.percent}%`,
-                        backgroundColor: subject.color,
-                      },
-                    ]}
-                  />
-                </View>
-              </View>
-            ))}
+
+        {/* Goals Progress */}
+        <View style={[styles.card, { backgroundColor: theme.backgroundSecondary }]}>
+          <View style={styles.cardHeader}>
+            <Target size={20} color={theme.primary} />
+            <Text style={[styles.cardTitle, { color: theme.text }]}>Goals</Text>
           </View>
-        ) : (
-          <Text style={styles.noDataText}>No subjects yet</Text>
-        )}
-      </View>
+          {goals.length > 0 ? (
+            <View style={styles.goalList}>
+              {goals.map((goal) => {
+                const percent = goal.targetHours > 0
+                  ? Math.min(100, Math.round((goal.currentHours / goal.targetHours) * 100))
+                  : 0;
 
-      {/* Goals Progress */}
-      <View style={styles.card}>
-        <View style={styles.cardHeader}>
-          <Target size={20} color="#6366F1" />
-          <Text style={styles.cardTitle}>Goals</Text>
-        </View>
-        {goals.length > 0 ? (
-          <View style={styles.goalList}>
-            {goals.map((goal) => {
-              const percent = goal.targetHours > 0
-                ? Math.min(100, Math.round((goal.currentHours / goal.targetHours) * 100))
-                : 0;
-
-              return (
-                <View key={goal.id} style={styles.goalItem}>
-                  <View style={styles.goalInfo}>
-                    <Text style={styles.goalTitle}>{goal.title}</Text>
-                    <Text style={styles.goalMeta}>
-                      {goal.currentHours}h / {goal.targetHours}h
-                    </Text>
+                return (
+                  <View key={goal.id} style={[styles.goalItem, { backgroundColor: theme.backgroundTertiary }]}>
+                    <View style={styles.goalInfo}>
+                      <Text style={[styles.goalTitle, { color: theme.text }]}>{goal.title}</Text>
+                      <Text style={[styles.goalMeta, { color: theme.textSecondary }]}>
+                        {goal.currentHours}h / {goal.targetHours}h
+                      </Text>
+                    </View>
+                    <View style={[styles.goalStatus, { backgroundColor: getStatusColor(goal.status, theme) }]}>
+                      <Text style={[styles.goalStatusText, { color: theme.text }]}>{goal.status}</Text>
+                    </View>
                   </View>
-                  <View style={[styles.goalStatus, { backgroundColor: getStatusColor(goal.status) }]}>
-                    <Text style={styles.goalStatusText}>{goal.status}</Text>
-                  </View>
-                </View>
-              );
-            })}
-          </View>
-        ) : (
-          <Text style={styles.noDataText}>No goals set</Text>
-        )}
-      </View>
-
-      {/* Recent Sessions */}
-      <View style={styles.card}>
-        <View style={styles.cardHeader}>
-          <Calendar size={20} color="#6366F1" />
-          <Text style={styles.cardTitle}>Recent Sessions</Text>
+                );
+              })}
+            </View>
+          ) : (
+            <Text style={[styles.noDataText, { color: theme.textTertiary }]}>No goals set</Text>
+          )}
         </View>
-        {sessions.length > 0 ? (
-          <View style={styles.sessionList}>
-            {sessions.slice(0, 5).map((session) => (
-              <View key={session.id} style={styles.sessionItem}>
-                <Text style={styles.sessionDate}>
-                  {new Date(session.date).toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                  })}
+
+        {/* Achievements Section */}
+        <View style={[styles.card, { backgroundColor: theme.backgroundSecondary }]}>
+          <View style={styles.cardHeader}>
+            <Award size={20} color={theme.primary} />
+            <Text style={[styles.cardTitle, { color: theme.text }]}>Achievements</Text>
+          </View>
+          <View style={styles.badgeGrid}>
+            {earnedBadges.map((badge) => (
+              <View
+                key={badge.id}
+                style={[
+                  styles.badgeItem,
+                  { backgroundColor: badge.earned ? theme.backgroundTertiary : `${theme.backgroundTertiary}50` }
+                ]}
+              >
+                <Text style={[styles.badgeIcon, !badge.earned && styles.badgeIconLocked]}>
+                  {badge.earned ? badge.icon : <Lock size={24} color={theme.textTertiary} />}
                 </Text>
-                <Text style={styles.sessionDuration}>{session.duration} min</Text>
+                <Text style={[styles.badgeName, { color: badge.earned ? theme.text : theme.textTertiary }]}>
+                  {badge.name}
+                </Text>
+                <Text style={[styles.badgeDesc, { color: badge.earned ? theme.textSecondary : theme.textTertiary }]}>
+                  {badge.desc}
+                </Text>
+                {badge.earned && (
+                  <View style={[styles.badgeEarned, { backgroundColor: `${theme.success}30` }]}>
+                    <Text style={[styles.badgeEarnedText, { color: theme.success }]}>✓</Text>
+                  </View>
+                )}
               </View>
             ))}
           </View>
-        ) : (
-          <Text style={styles.noDataText}>No sessions recorded</Text>
-        )}
-      </View>
-    </ScrollView>
+        </View>
+
+        {/* Recent Sessions */}
+        <View style={[styles.card, { backgroundColor: theme.backgroundSecondary }]}>
+          <View style={styles.cardHeader}>
+            <Calendar size={20} color={theme.primary} />
+            <Text style={[styles.cardTitle, { color: theme.text }]}>Recent Sessions</Text>
+          </View>
+          {sessions.length > 0 ? (
+            <View style={styles.sessionList}>
+              {sessions.slice(0, 5).map((session) => (
+                <View key={session.id} style={[styles.sessionItem, { borderBottomColor: theme.border }]}>
+                  <Text style={[styles.sessionDate, { color: theme.textSecondary }]}>
+                    {new Date(session.date).toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                    })}
+                  </Text>
+                  <Text style={[styles.sessionDuration, { color: theme.text }]}>{session.duration} min</Text>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Text style={[styles.noDataText, { color: theme.textTertiary }]}>No sessions recorded</Text>
+          )}
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
-function getStatusColor(status: string): string {
+function getStatusColor(status: string, theme: any): string {
   switch (status) {
     case 'completed':
-      return '#dcfce7';
+      return `${theme.success}30`;
     case 'active':
-      return '#dbeafe';
+      return `${theme.info}30`;
     case 'paused':
-      return '#fef3c7';
+      return `${theme.warning}30`;
     default:
-      return '#e2e8f0';
+      return theme.backgroundTertiary;
   }
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8fafc' },
-  header: { padding: 20, paddingTop: 20, borderBottomWidth: 1, borderBottomColor: '#e2e8f0', backgroundColor: '#fff' },
+  header: { padding: 20, paddingTop: 20, borderBottomWidth: 1, borderBottomColor: '#e2e8f0', backgroundColor: '#fff', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   title: { fontSize: 28, fontWeight: 'bold', color: '#0f172a' },
   subtitle: { fontSize: 14, color: '#64748b', marginTop: 4 },
+  exportBtn: { padding: 8, borderRadius: 8, backgroundColor: '#eef2ff' },
 
   summaryGrid: {
     flexDirection: 'row',
@@ -356,4 +448,13 @@ const styles = StyleSheet.create({
   sessionDuration: { fontSize: 14, fontWeight: '600', color: '#0f172a' },
 
   noDataText: { textAlign: 'center', color: '#94a3b8', fontSize: 14, paddingVertical: 20 },
+
+  badgeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  badgeItem: { width: '47%', padding: 12, borderRadius: 12, alignItems: 'center', position: 'relative' },
+  badgeIcon: { fontSize: 32, marginBottom: 8, textAlign: 'center' },
+  badgeIconLocked: { opacity: 0.4 },
+  badgeName: { fontSize: 13, fontWeight: '600', textAlign: 'center', marginBottom: 4 },
+  badgeDesc: { fontSize: 11, textAlign: 'center', lineHeight: 16 },
+  badgeEarned: { position: 'absolute', top: 4, right: 4, width: 20, height: 20, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  badgeEarnedText: { fontSize: 12, fontWeight: 'bold' },
 });

@@ -15,6 +15,8 @@ export interface Subject {
   updatedAt?: string;
 }
 
+export type RecurrencePattern = 'daily' | 'weekly' | 'biweekly' | 'monthly';
+
 export interface Task {
   id?: number;
   title: string;
@@ -33,6 +35,9 @@ export interface Task {
   createdAt?: string;
   updatedAt?: string;
   completedAt?: string | null;
+  isRecurring?: boolean;
+  recurrencePattern?: RecurrencePattern | null;
+  recurrenceEndDate?: string | null;
 }
 
 export interface StudySession {

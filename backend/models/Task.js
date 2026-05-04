@@ -68,6 +68,22 @@ const Task = sequelize.define('Task', {
   completedAt: {
     type: DataTypes.DATE,
     defaultValue: null
+  },
+  isRecurring: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  recurrencePattern: {
+    type: DataTypes.ENUM('daily', 'weekly', 'biweekly', 'monthly'),
+    defaultValue: null
+  },
+  recurrenceEndDate: {
+    type: DataTypes.STRING(10),
+    defaultValue: null
+  },
+  recurrenceParentId: {
+    type: DataTypes.INTEGER,
+    defaultValue: null
   }
 }, {
   tableName: 'tasks',

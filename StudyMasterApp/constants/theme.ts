@@ -1,41 +1,61 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
-
 import { Platform } from 'react-native';
 
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
-
-export const Colors = {
+export const AppTheme = {
   light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
+    background: '#f8fafc',
+    backgroundSecondary: '#ffffff',
+    backgroundTertiary: '#f1f5f9',
+    text: '#0f172a',
+    textSecondary: '#64748b',
+    textTertiary: '#94a3b8',
+    border: '#e2e8f0',
+    borderLight: '#f1f5f9',
+    primary: '#6366F1',
+    primaryLight: '#eef2ff',
+    success: '#22c55e',
+    successLight: '#dcfce7',
+    warning: '#f59e0b',
+    warningLight: '#fef3c7',
+    danger: '#ef4444',
+    dangerLight: '#fee2e2',
+    info: '#3b82f6',
+    infoLight: '#dbeafe',
+    purple: '#8b5cf6',
+    purpleLight: '#f3e8ff',
+    cardShadow: 'rgba(0, 0, 0, 0.05)',
+    overlay: 'rgba(0, 0, 0, 0.5)',
   },
   dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
+    background: '#0f172a',
+    backgroundSecondary: '#1e293b',
+    backgroundTertiary: '#334155',
+    text: '#f1f5f9',
+    textSecondary: '#94a3b8',
+    textTertiary: '#64748b',
+    border: '#334155',
+    borderLight: '#1e293b',
+    primary: '#818cf8',
+    primaryLight: '#1e1b4b',
+    success: '#4ade80',
+    successLight: '#052e16',
+    warning: '#fbbf24',
+    warningLight: '#451a03',
+    danger: '#f87171',
+    dangerLight: '#450a0a',
+    info: '#60a5fa',
+    infoLight: '#172554',
+    purple: '#a78bfa',
+    purpleLight: '#2e1065',
+    cardShadow: 'rgba(0, 0, 0, 0.3)',
+    overlay: 'rgba(0, 0, 0, 0.7)',
   },
 };
 
 export const Fonts = Platform.select({
   ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
     sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
     serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
     rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
     mono: 'ui-monospace',
   },
   default: {
@@ -51,3 +71,5 @@ export const Fonts = Platform.select({
     mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
   },
 });
+
+export type ThemeColors = typeof AppTheme.light;

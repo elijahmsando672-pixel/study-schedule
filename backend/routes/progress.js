@@ -1,0 +1,99 @@
+const express = require('express');
+const { Op } = require('sequelize');
+const StudySession = require('../models/StudySession');
+const Subject = require('../models/Subject');
+const { protect } = require('../middleware/auth');
+
+const router = express.Router();
+
+router.use(protect);
+
+router.get('/weekly', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const start = new Date(now);
+    start.setDate(now.getDate() - 6);
+    const startStr = start.toISOString().split('T')[0];
+    const endStr = now.toISOString().split('T')[0];
+
+    const sessions = await StudySession.findAll({
+      where: {
+        userId,
+        date: { [Op.between]: [startStr, endStr] }
+      },
+    });
+
+    const byDate = {};
+    sessions.forEach(s => {
+      byDate[s.date] = (byDate[s.date] || 0) + s.duration;
+    });
+
+    const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const result = [];
+
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      const dateStr = d.toISOString().split('T')[0];
+      result.push({
+        date: dateStr,
+        dayLabel: DAY_LABELS[d.getDay()],
+        minutes: byDate[dateStr] || 0,
+      });
+    }
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/by-subject', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const now = new Date();
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - now.getDay());
+    weekStart.setHours(0, 0, 0, 0);
+    const weekStartStr = weekStart.toISOString().split('T')[0];
+
+    const subjects = await Subject.findAll({ where: { userId } });
+
+    const sessions = await StudySession.findAll({
+      where: {
+        userId,
+        date: { [Op.gte]: weekStartStr }
+      },
+    });
+
+    const minutesBySubject = {};
+    sessions.forEach(s => {
+      minutesBySubject[s.subjectId] = (minutesBySubject[s.subjectId] || 0) + s.duration;
+    });
+
+    const result = subjects.map(subject => {
+      const minutesThisWeek = minutesBySubject[subject.id] || 0;
+      const goalMinutesPerWeek = subject.targetHours * 60;
+      const percent = goalMinutesPerWeek > 0
+        ? Math.min(100, Math.round((minutesThisWeek / goalMinutesPerWeek) * 100))
+        : 0;
+
+      return {
+        subjectId: subject.id,
+        subjectName: subject.name,
+        color: subject.color,
+        minutesThisWeek,
+        goalMinutesPerWeek,
+        percent,
+      };
+    });
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+module.exports = router;

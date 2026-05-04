@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Alert, SafeAreaView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Alert, SafeAreaView, RefreshControl, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Plus, BookOpen, Edit, Trash2, Palette as PaletteIcon } from 'lucide-react-native';
+import { Plus, BookOpen, Edit, Trash2, Palette as PaletteIcon, Search, X } from 'lucide-react-native';
 import { useStore } from '@/store/useStore';
 import { Subject } from '@/types';
 
@@ -12,14 +12,19 @@ const COLORS = [
 
 export default function SubjectsScreen() {
   const router = useRouter();
-  const { subjects, loadSubjects, addSubject, updateSubject, deleteSubject } = useStore();
+  const { subjects, loadSubjects, addSubject, updateSubject, deleteSubject, isLoading } = useStore();
+const [refreshing, setRefreshing] = useState(false);
 
+  const [searchQuery, setSearchQuery] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingSubject, setEditingSubject] = useState<Subject | null>(null);
   const [name, setName] = useState('');
   const [color, setColor] = useState(COLORS[0]);
   const [targetHours, setTargetHours] = useState('10');
   const [studyGuide, setStudyGuide] = useState('');
+  const [editingInline, setEditingInline] = useState<number | null>(null);
+  const [inlineName, setInlineName] = useState('');
+  const [inlineTargetHours, setInlineTargetHours] = useState('');
 
   useEffect(() => {
     loadSubjects();
@@ -104,7 +109,9 @@ export default function SubjectsScreen() {
     return targetMinutes > 0 ? Math.min(100, Math.round((totalMinutes / targetMinutes) * 100)) : 0;
   };
 
-  if (subjects.length === 0) {
+  const filteredSubjects = subjects.filter(s => !searchQuery || s.name.toLowerCase().includes(searchQuery.toLowerCase()));
+
+  if (subjects.length === 0 && !isLoading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.emptyContainer}>
@@ -116,18 +123,47 @@ export default function SubjectsScreen() {
         <TouchableOpacity style={styles.emptyBtn} onPress={() => setShowModal(true)}>
           <Plus size={20} color="#fff" />
           <Text style={styles.emptyBtnText}>Add First Subject</Text>
-</TouchableOpacity>
+        </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
+
+  if (isLoading && subjects.length === 0) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#6366F1" />
+          <Text style={styles.loadingText}>Loading subjects...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const startInlineEdit = (subject: Subject) => {
+    setEditingInline(subject.id);
+    setInlineName(subject.name);
+    setInlineTargetHours(subject.targetHours.toString());
+  };
+
+  const saveInlineEdit = async (subject: Subject) => {
+    try {
+      await updateSubject(subject.id, {
+        name: inlineName.trim(),
+        targetHours: parseInt(inlineTargetHours) || 10,
+      });
+      setEditingInline(null);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update subject');
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>Subjects</Text>
-          <Text style={styles.subtitle}>{subjects.length} active subjects</Text>
+          <Text style={styles.subtitle}>{filteredSubjects.length} active subjects</Text>
         </View>
         <TouchableOpacity style={styles.addBtn} onPress={() => setShowModal(true)}>
           <Plus size={18} color="#fff" />
@@ -135,9 +171,33 @@ export default function SubjectsScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.grid}>
-        {subjects.map((subject) => {
+      <View style={styles.searchRow}>
+        <View style={styles.searchBox}>
+          <Search size={16} color="#64748b" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search subjects..."
+            placeholderTextColor="#94a3b8"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <X size={16} color="#64748b" />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      <ScrollView
+        contentContainerStyle={styles.grid}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadSubjects().then(() => setRefreshing(false)); }} />
+        }
+      >
+        {filteredSubjects.map((subject) => {
           const progress = getProgress(subject.id);
+          const isInlineEditing = editingInline === subject.id;
 
           return (
             <View key={subject.id} style={styles.card}>
@@ -149,38 +209,66 @@ export default function SubjectsScreen() {
               </View>
 
               <View style={styles.cardBody}>
-                <Text style={styles.cardTitle}>{subject.name}</Text>
-
-                <View style={styles.cardMeta}>
-                  <Text style={styles.metaItem}>Goal: {subject.targetHours}h/week</Text>
-                  <Text style={styles.metaItem}>{progress}% complete</Text>
-                </View>
-
-                {subject.studyGuide && (
-                  <Text style={styles.guideText} numberOfLines={2}>
-                    📝 {subject.studyGuide}
-                  </Text>
-                )}
-
-                <View style={styles.progressContainer}>
-                  <View style={styles.progressBg}>
-                    <View
-                      style={[
-                        styles.progressFill,
-                        { width: `${progress}%`, backgroundColor: subject.color },
-                      ]}
+                {isInlineEditing ? (
+                  <>
+                    <TextInput
+                      style={styles.inlineInput}
+                      value={inlineName}
+                      onChangeText={setInlineName}
+                      autoFocus
                     />
-                  </View>
-                </View>
+                    <TextInput
+                      style={styles.inlineInput}
+                      value={inlineTargetHours}
+                      onChangeText={setInlineTargetHours}
+                      keyboardType="numeric"
+                      placeholder="Target hours"
+                    />
+                    <View style={styles.inlineActions}>
+                      <TouchableOpacity style={styles.inlineSaveBtn} onPress={() => saveInlineEdit(subject)}>
+                        <Text style={styles.inlineSaveText}>Save</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.inlineCancelBtn} onPress={() => setEditingInline(null)}>
+                        <Text style={styles.inlineCancelText}>Cancel</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.cardTitle}>{subject.name}</Text>
 
-                <View style={styles.cardActions}>
-                  <TouchableOpacity style={styles.editBtn} onPress={() => handleEdit(subject)}>
-                    <Edit size={16} color="#3b82f6" />
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete(subject)}>
-                    <Trash2 size={16} color="#ef4444" />
-                  </TouchableOpacity>
-                </View>
+                    <View style={styles.cardMeta}>
+                      <Text style={styles.metaItem}>Goal: {subject.targetHours}h/week</Text>
+                      <Text style={styles.metaItem}>{progress}% complete</Text>
+                    </View>
+
+                    {subject.studyGuide && (
+                      <Text style={styles.guideText} numberOfLines={2}>
+                        📝 {subject.studyGuide}
+                      </Text>
+                    )}
+
+                    <View style={styles.progressContainer}>
+                      <View style={styles.progressBg}>
+                        <View
+                          style={[
+                            styles.progressFill,
+                            { width: `${progress}%`, backgroundColor: subject.color },
+                          ]}
+                        />
+                      </View>
+                    </View>
+
+                    <View style={styles.cardActions}>
+                      <TouchableOpacity style={styles.editBtn} onPress={() => startInlineEdit(subject)}>
+                        <Edit size={16} color="#3b82f6" />
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete(subject)}>
+                        <Trash2 size={16} color="#ef4444" />
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
               </View>
             </View>
           );
@@ -281,6 +369,9 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 28, fontWeight: 'bold', color: '#0f172a' },
   subtitle: { fontSize: 14, color: '#64748b', marginTop: 4 },
+  searchRow: { paddingHorizontal: 20, marginBottom: 12 },
+  searchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10 },
+  searchInput: { flex: 1, fontSize: 14, color: '#0f172a' },
   addBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#0f172a', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8 },
   addBtnText: { color: '#fff', fontWeight: '600' },
 
@@ -331,4 +422,12 @@ const styles = StyleSheet.create({
   saveBtn: { flex: 1, padding: 14, borderRadius: 12, backgroundColor: '#0f172a', alignItems: 'center' },
   saveBtnDisabled: { backgroundColor: '#94a3b8' },
   saveBtnText: { color: '#fff', fontWeight: '600' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
+  loadingText: { fontSize: 14, color: '#64748b', marginTop: 12 },
+  inlineInput: { borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 8, padding: 8, fontSize: 14, marginBottom: 8, color: '#0f172a' },
+  inlineActions: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  inlineSaveBtn: { flex: 1, padding: 8, borderRadius: 8, backgroundColor: '#0f172a', alignItems: 'center' },
+  inlineSaveText: { color: '#fff', fontWeight: '600', fontSize: 14 },
+  inlineCancelBtn: { flex: 1, padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0', alignItems: 'center', backgroundColor: '#fff' },
+  inlineCancelText: { color: '#64748b', fontWeight: '600', fontSize: 14 },
 });

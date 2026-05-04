@@ -12,16 +12,17 @@ import {
   SafeAreaView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { User, Mail, Lock, LogOut, Edit3, Shield, Database, RefreshCw, Wifi, WifiOff } from 'lucide-react-native';
+import { User, Mail, Lock, LogOut, Edit3, Shield, Database, RefreshCw, Wifi, WifiOff, Sun, Moon, Smartphone } from 'lucide-react-native';
 import { useStore } from '@/store/useStore';
 import { api } from '@/services/api';
 import { dbService } from '@/services/database';
 import { syncService } from '@/services/sync';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User as UserType } from '@/types';
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, setUser, isAuthenticated, setAuthenticated } = useStore();
+  const { user, setUser, isAuthenticated, setAuthenticated, dashboardSummary, sessions, loadDashboardData } = useStore();
 
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [isLogin, setIsLogin] = useState(true);
@@ -33,6 +34,8 @@ export default function ProfileScreen() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
   const [pendingSyncs, setPendingSyncs] = useState(0);
+const [themePref, setThemePref] = useState<'auto' | 'light' | 'dark'>('auto');
+const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     checkServerAndDB();
@@ -45,6 +48,16 @@ export default function ProfileScreen() {
     }, 5000);
 
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    loadDashboardData();
+  }, []);
+
+  useEffect(() => {
+    AsyncStorage.getItem('themePreference').then(val => {
+      if (val) setThemePref(val as 'auto' | 'light' | 'dark');
+    });
   }, []);
 
   const checkServerAndDB = async () => {
@@ -165,11 +178,29 @@ export default function ProfileScreen() {
     return { color: '#ef4444', text: 'Offline', icon: WifiOff };
   };
 
+  const toggleTheme = () => {
+    const order: ('auto' | 'light' | 'dark')[] = ['auto', 'light', 'dark'];
+    const nextIndex = (order.indexOf(themePref) + 1) % 3;
+    const next = order[nextIndex];
+    setThemePref(next);
+    AsyncStorage.setItem('themePreference', next);
+  };
+
   const status = getConnectionStatus();
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView>
+      <ScrollView
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              Promise.all([checkServerAndDB(), checkPendingSyncs()]).then(() => setRefreshing(false));
+            }}
+          />
+        }
+      >
       {/* Header */}
       <View style={styles.header}>
         <View style={[styles.avatar, { backgroundColor: user?.avatar ? 'transparent' : '#eef2ff' }]}>
@@ -191,15 +222,15 @@ export default function ProfileScreen() {
       {/* Stats */}
       <View style={styles.statsGrid}>
         <View style={styles.statCard}>
-          <Text style={styles.statValue}>24h</Text>
+          <Text style={styles.statValue}>{`${Math.round((dashboardSummary?.minutesToday || 0) / 60)}h`}</Text>
           <Text style={styles.statLabel}>Productivity</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statValue}>7d</Text>
+          <Text style={styles.statValue}>{`${dashboardSummary?.currentStreakDays || 0}d`}</Text>
           <Text style={styles.statLabel}>Streak</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statValue}>42h</Text>
+          <Text style={styles.statValue}>{`${Math.round(sessions.reduce((a, s) => a + s.duration, 0) / 60)}h`}</Text>
           <Text style={styles.statLabel}>Total</Text>
         </View>
       </View>
@@ -267,6 +298,11 @@ export default function ProfileScreen() {
           <TouchableOpacity style={styles.menuItem}>
             <Shield size={20} color="#64748b" />
             <Text style={styles.menuText}>Privacy & Security</Text>
+          </TouchableOpacity>
+          <View style={styles.divider} />
+          <TouchableOpacity style={styles.menuItem} onPress={toggleTheme}>
+            {themePref === 'auto' ? <Smartphone size={20} color="#64748b" /> : themePref === 'dark' ? <Moon size={20} color="#64748b" /> : <Sun size={20} color="#64748b" />}
+            <Text style={styles.menuText}>Theme: {themePref.charAt(0).toUpperCase() + themePref.slice(1)}</Text>
           </TouchableOpacity>
           <View style={styles.divider} />
           <TouchableOpacity
