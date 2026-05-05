@@ -16,7 +16,7 @@ const BADGES = [
     const todayTasks = tasks.filter((t: any) => t.date === today);
     return todayTasks.length > 0 && todayTasks.every((t: any) => t.status === 'completed');
   }},
-  { id: 'five_subjects', name: 'Scholar', desc: 'Add 5 subjects', icon: 'S', check: (_: any[], __: number, ___: number, ___: any[], subjects: any[]) => subjects.length >= 5 },
+  { id: 'five_subjects', name: 'Scholar', desc: 'Add 5 subjects', icon: 'S', check: (_: any[], __: number, ___: number, ____: any[], _____: any[], subjects: any[]) => subjects.length >= 5 },
   { id: 'hundred_hours', name: 'Century', desc: 'Study for 100 hours total', icon: '100', check: (_: any[], totalHours: number) => totalHours >= 100 },
 ];
 

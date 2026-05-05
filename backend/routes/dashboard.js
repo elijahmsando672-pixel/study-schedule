@@ -1,5 +1,5 @@
 const express = require('express');
-const { Op, fn, col, literal } = require('sequelize');
+const { Op } = require('sequelize');
 const Task = require('../models/Task');
 const StudySession = require('../models/StudySession');
 const Goal = require('../models/Goal');
@@ -20,7 +20,7 @@ router.get('/summary', async (req, res) => {
     const now = new Date();
     const weekStart = new Date(now);
     weekStart.setDate(now.getDate() - now.getDay());
-    const weekStartStr = weekStart.toISOString().split('T')[0];
+    weekStart.setHours(0, 0, 0, 0);
 
     const [
       todaySessions,
@@ -30,8 +30,18 @@ router.get('/summary', async (req, res) => {
       activeReminders,
       activeGoals,
     ] = await Promise.all([
-      StudySession.findAll({ where: { userId, date: today } }),
-      StudySession.findAll({ where: { userId, date: { [Op.gte]: weekStartStr } } }),
+      StudySession.findAll({ 
+        where: { 
+          userId, 
+          startTime: { [Op.gte]: new Date(today) }
+        } 
+      }),
+      StudySession.findAll({ 
+        where: { 
+          userId, 
+          startTime: { [Op.gte]: weekStart } 
+        } 
+      }),
       Task.findAll({ where: { userId } }),
       Subject.findAll({ where: { userId } }),
       Reminder.findAll({ where: { userId, isActive: true } }),
@@ -46,22 +56,21 @@ router.get('/summary', async (req, res) => {
     const streak = calculateStreak(completedTasks);
 
     const weeklyGoalMinutes = activeGoals.reduce((acc, g) => {
-      const subject = allSubjects.find(s => s.id === g.subjectId);
-      return acc + (subject ? subject.targetHours * 60 : 0);
+      return acc + (g.targetHours * 60);
     }, 0) || 600;
 
-    res.json({
-      minutesToday,
-      minutesThisWeek,
-      sessionsThisWeek,
-      currentStreakDays: streak,
-      weeklyGoalMinutes,
-      subjectCount: allSubjects.length,
-      upcomingReminderCount: activeReminders.length,
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
+     res.json({
+       minutesToday,
+       minutesThisWeek,
+       sessionsThisWeek,
+       currentStreakDays: streak,
+       weeklyGoalMinutes,
+       subjectCount: allSubjects.length,
+       upcomingReminderCount: activeReminders.length,
+     });
+   } catch (error) {
+     res.status(500).json({ message: error.message });
+   }
 });
 
 router.get('/today', async (req, res) => {

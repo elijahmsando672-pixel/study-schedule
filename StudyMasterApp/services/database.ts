@@ -1,26 +1,53 @@
 import * as SQLite from 'expo-sqlite';
-import { Subject, Task, StudySession, Goal, ScheduleSlot, Reminder, Priority, TaskStatus } from '../types';
+import { Subject, Task, StudySession, Goal, ScheduleSlot, Reminder, Priority, TaskStatus, DayOfWeek } from '../types';
 
 class DatabaseService {
   private db: SQLite.SQLiteDatabase | null = null;
+  private static instance: DatabaseService | null = null;
+  private isInitialized = false;
+  private queryTimeoutMs = 5000; // 5 second timeout for queries
+  private preparedStatements = new Map<string, any>();
+  
+  // Type-safe wrapper for query execution
+  private async executeQuery<T>(query: string, params: any[] = []): Promise<T[]> {
+    if (!this.db) throw new Error('Database not initialized');
+    return this.db.getAllAsync<T>(query, params);
+  }
+
+  // Private constructor to enforce singleton pattern
+  private constructor() {}
+
+  // Static method to get the singleton instance
+  public static getInstance(): DatabaseService {
+    if (!DatabaseService.instance) {
+      DatabaseService.instance = new DatabaseService();
+    }
+    return DatabaseService.instance;
+  }
 
   async init() {
+    // Prevent multiple initializations
+    if (this.isInitialized) {
+      return;
+    }
+
     try {
       this.db = await SQLite.openDatabaseAsync('studymaster.db');
 
       // Enable foreign keys
       await this.db.execAsync('PRAGMA foreign_keys = ON;');
 
-       // Create tables
-       await this.createTables();
+      // Create tables
+      await this.createTables();
 
-       // Run migrations
-       await this.runMigrations();
+      // Run migrations
+      await this.runMigrations();
 
-       // Generate recurring task instances
-       await this.generateRecurringInstances();
+      // Generate recurring task instances
+      await this.generateRecurringInstances();
 
-       console.log('✅ Database initialized');
+      this.isInitialized = true;
+      console.log('✅ Database initialized');
     } catch (error) {
       console.error('❌ Database initialization failed:', error);
       throw error;
@@ -315,7 +342,7 @@ class DatabaseService {
       is_recurring: data.isRecurring ? 1 : 0,
       recurrence_pattern: data.recurrencePattern,
       recurrence_end_date: data.recurrenceEndDate,
-      recurrence_parent_id: data.recurrenceParentId,
+      recurrence_parent_id: (data as any).recurrenceParentId,
     };
 
     const id = await this.insert('tasks', taskData);
@@ -592,7 +619,7 @@ class DatabaseService {
     if (!this.db) throw new Error('Database not initialized');
 
     const today = new Date().toISOString().split('T')[0];
-    const result = await this.db.getAllFirstAsync<{ total: number }>(
+    const result = await this.db.getFirstAsync<{ total: number }>(
       `SELECT COALESCE(SUM(duration), 0) as total FROM sessions WHERE date = ?`,
       [today]
     );
@@ -605,22 +632,22 @@ class DatabaseService {
 
     const weekStart = new Date();
     weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-    weekStart = weekStart.toISOString().split('T')[0];
+    const weekStartStr = weekStart.toISOString().split('T')[0];
 
     const [totalResult, countResult] = await Promise.all([
-      this.db.getAllFirstAsync<{ total: number }>(
+      this.db.getFirstAsync<{ total: number }>(
         `SELECT COALESCE(SUM(duration), 0) as total FROM sessions WHERE date >= ?`,
-        [weekStart]
+        [weekStartStr]
       ),
-      this.db.getAllFirstAsync<{ count: number }>(
+      this.db.getFirstAsync<{ count: number }>(
         `SELECT COUNT(*) as count FROM sessions WHERE date >= ?`,
-        [weekStart]
+        [weekStartStr]
       ),
     ]);
 
     return {
-      totalMinutes: totalResult[0]?.total || 0,
-      sessionCount: countResult[0]?.count || 0,
+      totalMinutes: (totalResult as any)?.total || 0,
+      sessionCount: (countResult as any)[0]?.count || 0,
     };
   }
 
@@ -665,9 +692,9 @@ class DatabaseService {
   }>> {
     if (!this.db) throw new Error('Database not initialized');
 
-    const weekStart = new Date();
-    weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-    weekStart = weekStart.toISOString().split('T')[0];
+    const weekStart2 = new Date();
+    weekStart2.setDate(weekStart2.getDate() - weekStart2.getDay());
+    const weekStartStr2 = weekStart2.toISOString().split('T')[0];
 
     // Get all subjects with their sessions this week
     const result = await this.db.getAllAsync(`
@@ -680,7 +707,7 @@ class DatabaseService {
       FROM subjects s
       LEFT JOIN sessions ses ON s.id = ses.subject_id AND ses.date >= ?
       GROUP BY s.id
-    `, [weekStart]);
+    `, [weekStartStr2]);
 
     return result.map(row => ({
       subjectId: row.subjectId,
@@ -753,6 +780,156 @@ class DatabaseService {
     for (const table of tables) {
       await this.db.runAsync(`DELETE FROM ${table}`);
     }
+  }
+
+  // Transaction support
+  async beginTransaction(): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+    await this.db.execAsync('BEGIN TRANSACTION');
+  }
+
+  async commitTransaction(): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+    await this.db.execAsync('COMMIT');
+  }
+
+  async rollbackTransaction(): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+    await this.db.execAsync('ROLLBACK');
+  }
+
+  // Execute with transaction (auto-commit or rollback)
+  async withTransaction<T>(operation: () => Promise<T>): Promise<T> {
+    await this.beginTransaction();
+    try {
+      const result = await operation();
+      await this.commitTransaction();
+      return result;
+    } catch (error) {
+      await this.rollbackTransaction();
+      throw error;
+    }
+  }
+
+  // Query with timeout support
+  private async withTimeout<T>(operation: Promise<T>, timeoutMs: number = this.queryTimeoutMs): Promise<T> {
+    let timeoutId: ReturnType<typeof setTimeout>;
+
+    const timeoutPromise = new Promise<T>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error(`Query timeout after ${timeoutMs}ms`));
+      }, timeoutMs);
+    });
+
+    try {
+      const result = await Promise.race([operation, timeoutPromise]);
+      clearTimeout(timeoutId!);
+      return result;
+    } catch (error) {
+      clearTimeout(timeoutId!);
+      throw error;
+    }
+  }
+
+  // Prepared statements support
+  async prepareStatement(sql: string): Promise<any> {
+    if (!this.db) throw new Error('Database not initialized');
+    
+    if (this.preparedStatements.has(sql)) {
+      return this.preparedStatements.get(sql)!;
+    }
+    
+    const stmt = await this.db.prepareAsync(sql);
+    this.preparedStatements.set(sql, stmt);
+    return stmt;
+  }
+
+  // Execute prepared statement with timeout
+  async executePrepared(stmt: any, params: any[] = []): Promise<any> {
+    return stmt.executeAsync(params);
+  }
+
+  // Get all with prepared statement
+  async getAllPrepared<T>(stmt: any, params: any[] = []): Promise<T[]> {
+    return stmt.executeAsync(params) as Promise<T[]>;
+  }
+
+  // Cleanup prepared statements
+  async finalizePreparedStatements(): Promise<void> {
+    for (const stmt of this.preparedStatements.values()) {
+      await stmt.finalizeAsync();
+    }
+    this.preparedStatements.clear();
+  }
+
+  // Pagination support for large datasets
+  async getPaginated<T>(
+    table: string,
+    page: number = 1,
+    pageSize: number = 20,
+    where?: { column: string; value: any }[],
+    orderBy?: { column: string; direction: 'ASC' | 'DESC' }
+  ): Promise<{ data: T[]; total: number; page: number; pageSize: number; totalPages: number }> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    // Build WHERE clause
+    let whereClause = '';
+    const params: any[] = [];
+    if (where && where.length > 0) {
+      const conditions = where.map(w => `${w.column} = ?`).join(' AND ');
+      whereClause = `WHERE ${conditions}`;
+      params.push(...where.map(w => w.value));
+    }
+
+    // Get total count
+    const countResult = await this.db.getAllAsync<{ count: number }>(
+      `SELECT COUNT(*) as count FROM ${table} ${whereClause}`,
+      params
+    );
+    const total = countResult[0]?.count || 0;
+
+    // Build ORDER BY clause
+    let orderClause = '';
+    if (orderBy) {
+      orderClause = `ORDER BY ${orderBy.column} ${orderBy.direction}`;
+    } else {
+      orderClause = 'ORDER BY id DESC';
+    }
+
+    // Calculate offset
+    const offset = (page - 1) * pageSize;
+
+    // Get paginated data
+    const data = await this.db.getAllAsync<T>(
+      `SELECT * FROM ${table} ${whereClause} ${orderClause} LIMIT ? OFFSET ?`,
+      [...params, pageSize, offset]
+    );
+
+    return {
+      data,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    };
+  }
+
+  // Query profiling (development only)
+  async profileQuery<T>(query: string, params: any[] = []): Promise<{ result: T[]; duration: number }> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const start = Date.now();
+    const result = await this.db.getAllAsync<T>(query, params);
+    const duration = Date.now() - start;
+
+    if (__DEV__) {
+      console.log(`[DB Profile] Query took ${duration}ms:`, query.substring(0, 100));
+      if (duration > 100) {
+        console.warn(`[DB Profile] Slow query detected (${duration}ms)`);
+      }
+    }
+
+    return { result, duration };
   }
 
   // Generate recurring task instances from completed recurring tasks
@@ -902,4 +1079,4 @@ class DatabaseService {
   }
 }
 
-export const dbService = new DatabaseService();
+export const dbService = DatabaseService.getInstance();

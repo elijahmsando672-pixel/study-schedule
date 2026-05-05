@@ -1,7 +1,5 @@
 const express = require('express');
-const { Op } = require('sequelize');
 const Task = require('../models/Task');
-const StudySession = require('../models/StudySession');
 const Goal = require('../models/Goal');
 const { protect } = require('../middleware/auth');
 

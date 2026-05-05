@@ -9,18 +9,18 @@ router.use(protect);
 
 router.get('/', async (req, res) => {
   try {
-    const { subjectId, startDate, endDate } = req.query;
+    const { subject, startDate, endDate } = req.query;
 
     const where = { userId: req.user.id };
 
-    if (subjectId) where.subjectId = subjectId;
+    if (subject) where.subject = subject;
     if (startDate && endDate) {
-      where.date = { [Op.between]: [startDate, endDate] };
+      where.startTime = { [Op.between]: [new Date(startDate), new Date(endDate)] };
     }
 
     const sessions = await StudySession.findAll({
       where,
-      order: [['date', 'DESC']],
+      order: [['startTime', 'DESC']],
     });
 
     res.json(sessions);

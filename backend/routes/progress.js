@@ -12,30 +12,31 @@ router.get('/weekly', async (req, res) => {
   try {
     const userId = req.user.id;
     const now = new Date();
-    now.setHours(0, 0, 0, 0);
+    now.setHours(23, 59, 59, 999);
     const start = new Date(now);
     start.setDate(now.getDate() - 6);
-    const startStr = start.toISOString().split('T')[0];
-    const endStr = now.toISOString().split('T')[0];
+    start.setHours(0, 0, 0, 0);
 
     const sessions = await StudySession.findAll({
       where: {
         userId,
-        date: { [Op.between]: [startStr, endStr] }
+        startTime: { [Op.between]: [start, now] }
       },
     });
 
     const byDate = {};
     sessions.forEach(s => {
-      byDate[s.date] = (byDate[s.date] || 0) + s.duration;
+      const dateStr = new Date(s.startTime).toISOString().split('T')[0];
+      byDate[dateStr] = (byDate[dateStr] || 0) + s.duration;
     });
 
     const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const result = [];
+    const startDate = new Date(start);
 
     for (let i = 0; i < 7; i++) {
-      const d = new Date(start);
-      d.setDate(start.getDate() + i);
+      const d = new Date(startDate);
+      d.setDate(startDate.getDate() + i);
       const dateStr = d.toISOString().split('T')[0];
       result.push({
         date: dateStr,
@@ -57,24 +58,24 @@ router.get('/by-subject', async (req, res) => {
     const weekStart = new Date(now);
     weekStart.setDate(now.getDate() - now.getDay());
     weekStart.setHours(0, 0, 0, 0);
-    const weekStartStr = weekStart.toISOString().split('T')[0];
 
     const subjects = await Subject.findAll({ where: { userId } });
 
     const sessions = await StudySession.findAll({
       where: {
         userId,
-        date: { [Op.gte]: weekStartStr }
+        startTime: { [Op.gte]: weekStart }
       },
     });
 
     const minutesBySubject = {};
     sessions.forEach(s => {
-      minutesBySubject[s.subjectId] = (minutesBySubject[s.subjectId] || 0) + s.duration;
+      const subjectName = s.subject || 'General';
+      minutesBySubject[subjectName] = (minutesBySubject[subjectName] || 0) + s.duration;
     });
 
     const result = subjects.map(subject => {
-      const minutesThisWeek = minutesBySubject[subject.id] || 0;
+      const minutesThisWeek = minutesBySubject[subject.name] || 0;
       const goalMinutesPerWeek = subject.targetHours * 60;
       const percent = goalMinutesPerWeek > 0
         ? Math.min(100, Math.round((minutesThisWeek / goalMinutesPerWeek) * 100))

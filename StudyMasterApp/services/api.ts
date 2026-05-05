@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosResponse } from 'axios';
+import axios, { AxiosInstance, AxiosResponse, InternalAxiosRequestConfig, AxiosError } from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import {
   Task,
@@ -13,9 +13,37 @@ import {
   User
 } from '../types';
 
+// Define custom error types for better error handling
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public statusCode?: number,
+    public errorCode?: string
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+export class AuthError extends ApiError {
+  constructor(message: string) {
+    super(message, 401, 'AUTH_ERROR');
+    this.name = 'AuthError';
+  }
+}
+
+export class NetworkError extends ApiError {
+  constructor(message: string) {
+    super(message, 0, 'NETWORK_ERROR');
+    this.name = 'NetworkError';
+  }
+}
+
 class ApiService {
   private client: AxiosInstance;
   private baseURL: string;
+  private readonly maxRetries = 3;
+  private readonly baseDelay = 1000; // 1 second
 
   constructor() {
     // Determine the correct API URL based on environment
@@ -26,7 +54,7 @@ class ApiService {
       // For simulator/emulator, localhost works
       // Priority: EXPO_PUBLIC_API_URL > localhost > 10.0.2.2 (Android emulator)
       apiUrl = process.env.EXPO_PUBLIC_API_URL ||
-               'http://localhost:5000/api';
+              'http://localhost:5000/api';
 
       // Auto-detect Android emulator
       if (!apiUrl.includes('localhost') && !apiUrl.includes('127.0.0.1')) {
@@ -44,36 +72,125 @@ class ApiService {
 
     this.client = axios.create({
       baseURL: this.baseURL,
-      timeout: 10000,
+      timeout: 15000, // Increased timeout
       headers: {
         'Content-Type': 'application/json',
       },
     });
 
-    // Request interceptor to add auth token
+    // Request interceptor to add auth token and metadata
     this.client.interceptors.request.use(
-      async (config) => {
+      async (config: InternalAxiosRequestConfig) => {
         const token = await this.getToken();
         if (token) {
           config.headers.Authorization = `Bearer ${token}`;
         }
+        
+        // Add request timestamp for logging
+        config.metadata = {
+          startTime: Date.now(),
+        };
+        
         return config;
       },
-      (error) => Promise.reject(error)
+      (error: AxiosError) => Promise.reject(error)
     );
 
-    // Response interceptor for error handling
+    // Response interceptor for error handling and logging
     this.client.interceptors.response.use(
-      (response) => response,
-      async (error) => {
-        if (error.response?.status === 401) {
-          // Token expired or invalid - logout
+      (response: AxiosResponse) => {
+        // Log successful requests in development
+        if (__DEV__ && response.config.metadata) {
+          const duration = Date.now() - response.config.metadata.startTime;
+          console.log(`[API] ${response.config.method?.toUpperCase()} ${response.config.url} - ${response.status} (${duration}ms)`);
+        }
+        return response;
+      },
+      async (error: AxiosError) => {
+        // Log error in development
+        if (__DEV__) {
+          console.error('[API Error]', {
+            url: error.config?.url,
+            method: error.config?.method,
+            status: error.response?.status,
+            message: error.message,
+          });
+        }
+
+        // Handle specific error cases
+        if (error.code === 'ECONNABORTED') {
+          return Promise.reject(new NetworkError('Request timeout'));
+        }
+
+        if (!error.response) {
+          return Promise.reject(new NetworkError('Network error - please check your connection'));
+        }
+
+        const { status, data } = error.response;
+        
+        // Handle authentication errors
+        if (status === 401) {
           await this.clearToken();
           // Could navigate to login here
+          return Promise.reject(new AuthError('Authentication failed - please log in again'));
         }
-        return Promise.reject(error);
+
+        // Handle rate limiting
+        if (status === 429) {
+          return Promise.reject(new ApiError('Rate limit exceeded. Please try again later.', status, 'RATE_LIMIT_ERROR'));
+        }
+
+        // Handle validation errors
+        if (status === 400) {
+          const errorMessage = data?.message || 'Validation error';
+          return Promise.reject(new ApiError(errorMessage, status, 'VALIDATION_ERROR'));
+        }
+
+        // Handle server errors
+        if (status >= 500) {
+          return Promise.reject(new ApiError('Server error. Please try again later.', status, 'SERVER_ERROR'));
+        }
+
+        // Default error handling
+        const errorMessage = data?.message || error.message || 'An unknown error occurred';
+        return Promise.reject(new ApiError(errorMessage, status));
       }
     );
+  }
+
+  // Helper method for making requests with retry logic
+  private async requestWithRetry<T>(
+    operation: () => Promise<T>,
+    maxRetries: number = this.maxRetries
+  ): Promise<T> {
+    let lastError: any;
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        
+        // Don't retry on auth errors or validation errors
+        if (error instanceof AuthError || 
+            error.name === 'VALIDATION_ERROR' ||
+            (error.statusCode && error.statusCode >= 400 && error.statusCode < 500 && 
+             error.statusCode !== 429)) {
+          throw error;
+        }
+        
+        // If this was the last attempt, throw the error
+        if (attempt === maxRetries) {
+          break;
+        }
+        
+        // Wait before retrying (exponential backoff)
+        const delay = this.baseDelay * Math.pow(2, attempt);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    
+    throw lastError;
   }
 
   // Token management
@@ -123,65 +240,79 @@ class ApiService {
     return response.data;
   }
 
-  // Tasks
-  async getTasks(params?: { status?: string; date?: string }): Promise<Task[]> {
-    const response = await this.client.get('/tasks', { params });
-    return response.data;
-  }
+   // Tasks
+   async getTasks(params?: { status?: string; date?: string }): Promise<Task[]> {
+     return this.requestWithRetry(() => 
+       this.client.get('/tasks', { params }).then(res => res.data)
+     );
+   }
 
-  async getTask(id: number): Promise<Task> {
-    const response = await this.client.get(`/tasks/${id}`);
-    return response.data;
-  }
+   async getTask(id: number): Promise<Task> {
+     return this.requestWithRetry(() => 
+       this.client.get(`/tasks/${id}`).then(res => res.data)
+     );
+   }
 
-  async createTask(data: Partial<Task>): Promise<Task> {
-    const response = await this.client.post('/tasks', data);
-    return response.data;
-  }
+   async createTask(data: Partial<Task>): Promise<Task> {
+     return this.requestWithRetry(() => 
+       this.client.post('/tasks', data).then(res => res.data)
+     );
+   }
 
-  async updateTask(id: number, data: Partial<Task>): Promise<Task> {
-    const response = await this.client.put(`/tasks/${id}`, data);
-    return response.data;
-  }
+   async updateTask(id: number, data: Partial<Task>): Promise<Task> {
+     return this.requestWithRetry(() => 
+       this.client.put(`/tasks/${id}`, data).then(res => res.data)
+     );
+   }
 
-  async deleteTask(id: number): Promise<void> {
-    await this.client.delete(`/tasks/${id}`);
-  }
+   async deleteTask(id: number): Promise<void> {
+     return this.requestWithRetry(() => 
+       this.client.delete(`/tasks/${id}`).then(res => res.data)
+     );
+   }
 
-  async completeTask(id: number): Promise<Task> {
-    const response = await this.client.post(`/tasks/${id}/complete`);
-    return response.data;
-  }
+   async completeTask(id: number): Promise<Task> {
+     return this.requestWithRetry(() => 
+       this.client.post(`/tasks/${id}/complete`).then(res => res.data)
+     );
+   }
 
-  async startTask(id: number): Promise<Task> {
-    const response = await this.client.post(`/tasks/${id}/start`);
-    return response.data;
-  }
+   async startTask(id: number): Promise<Task> {
+     return this.requestWithRetry(() => 
+       this.client.post(`/tasks/${id}/start`).then(res => res.data)
+     );
+   }
 
-  // Subjects
-  async getSubjects(): Promise<Subject[]> {
-    const response = await this.client.get('/subjects');
-    return response.data;
-  }
+   // Subjects
+   async getSubjects(): Promise<Subject[]> {
+     return this.requestWithRetry(() => 
+       this.client.get('/subjects').then(res => res.data)
+     );
+   }
 
-  async getSubject(id: number): Promise<Subject> {
-    const response = await this.client.get(`/subjects/${id}`);
-    return response.data;
-  }
+   async getSubject(id: number): Promise<Subject> {
+     return this.requestWithRetry(() => 
+       this.client.get(`/subjects/${id}`).then(res => res.data)
+     );
+   }
 
-  async createSubject(data: Partial<Subject>): Promise<Subject> {
-    const response = await this.client.post('/subjects', data);
-    return response.data;
-  }
+   async createSubject(data: Partial<Subject>): Promise<Subject> {
+     return this.requestWithRetry(() => 
+       this.client.post('/subjects', data).then(res => res.data)
+     );
+   }
 
-  async updateSubject(id: number, data: Partial<Subject>): Promise<Subject> {
-    const response = await this.client.put(`/subjects/${id}`, data);
-    return response.data;
-  }
+   async updateSubject(id: number, data: Partial<Subject>): Promise<Subject> {
+     return this.requestWithRetry(() => 
+       this.client.put(`/subjects/${id}`, data).then(res => res.data)
+     );
+   }
 
-  async deleteSubject(id: number): Promise<void> {
-    await this.client.delete(`/subjects/${id}`);
-  }
+   async deleteSubject(id: number): Promise<void> {
+     return this.requestWithRetry(() => 
+       this.client.delete(`/subjects/${id}`).then(res => res.data)
+     );
+   }
 
   // Study Sessions
   async getSessions(params?: { subjectId?: number; startDate?: string; endDate?: string }): Promise<StudySession[]> {
@@ -295,20 +426,101 @@ class ApiService {
     return response.data;
   }
 
-  // Sync operations
+  // Sync operations with conflict resolution
   async syncPendingChanges(changes: Array<{
     table: string;
     recordId: number;
     operation: 'INSERT' | 'UPDATE' | 'DELETE';
     data: Record<string, any>;
   }>): Promise<void> {
-    // Batch sync endpoint (to be implemented on backend)
     try {
       await this.client.post('/sync', { changes });
     } catch (error) {
       console.error('Sync failed:', error);
       throw error;
     }
+  }
+
+  // Sync with conflict resolution support
+  async syncWithConflictResolution(changes: Array<{
+    table: string;
+    recordId: number;
+    operation: 'INSERT' | 'UPDATE' | 'DELETE';
+    data: Record<string, any>;
+    clientUpdatedAt?: string;
+  }>): Promise<{
+    syncedIds: number[];
+    conflicts: Array<{
+      table: string;
+      recordId: number;
+      serverData: any;
+      clientData: any;
+    }>;
+  }> {
+    try {
+      const response = await this.client.post('/sync/with-conflicts', {
+        changes,
+        clientTimestamp: new Date().toISOString(),
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Sync with conflict resolution failed:', error);
+      throw error;
+    }
+  }
+
+  // Request cancellation support
+  private abortControllers = new Map<string, AbortController>();
+
+  // Create a cancellable request
+  private async cancellableRequest<T>(
+    key: string,
+    request: (signal: AbortSignal) => Promise<T>
+  ): Promise<T> {
+    // Cancel any existing request with the same key
+    if (this.abortControllers.has(key)) {
+      this.abortControllers.get(key)?.abort();
+    }
+
+    const controller = new AbortController();
+    this.abortControllers.set(key, controller);
+
+    try {
+      const result = await request(controller.signal);
+      this.abortControllers.delete(key);
+      return result;
+    } catch (error: any) {
+      this.abortControllers.delete(key);
+      if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
+        throw new ApiError('Request cancelled', 0, 'REQUEST_CANCELLED');
+      }
+      throw error;
+    }
+  }
+
+  // Wrapper methods with cancellation support for frequently updated data
+  async getTasksCancellable(params?: { status?: string; date?: string }): Promise<Task[]> {
+    return this.cancellableRequest('getTasks', (signal) =>
+      this.client.get('/tasks', { params, signal }).then(res => res.data)
+    );
+  }
+
+  async getSubjectsCancellable(): Promise<Subject[]> {
+    return this.cancellableRequest('getSubjects', (signal) =>
+      this.client.get('/subjects', { signal }).then(res => res.data)
+    );
+  }
+
+  async getDashboardSummaryCancellable(): Promise<DashboardSummary> {
+    return this.cancellableRequest('getDashboard', (signal) =>
+      this.client.get('/dashboard/summary', { signal }).then(res => res.data)
+    );
+  }
+
+  // Cancel all pending requests
+  cancelAllRequests(): void {
+    this.abortControllers.forEach(controller => controller.abort());
+    this.abortControllers.clear();
   }
 
   // Health check

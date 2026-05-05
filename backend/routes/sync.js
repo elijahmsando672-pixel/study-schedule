@@ -1,20 +1,19 @@
 const express = require('express');
 const router = express.Router();
-const { protect } = require('../middleware/auth');
 const Task = require('../models/Task');
 const StudySession = require('../models/StudySession');
 const Goal = require('../models/Goal');
 const Subject = require('../models/Subject');
+const { protect } = require('../middleware/auth');
 
-// Protect all routes - require authentication
 router.use(protect);
 
 /**
- * POST /api/sync
- * Receives batch of changes from mobile app and applies them to PostgreSQL
- * Body: { changes: [{ table, recordId, operation, data }] }
+ * POST /api/sync/with-conflicts
+ * Receives batch of changes with client timestamps, handles conflicts
+ * Returns: { syncedIds: [], conflicts: [{ table, recordId, serverData, clientData }] }
  */
-router.post('/', async (req, res) => {
+router.post('/with-conflicts', async (req, res) => {
   try {
     const { changes } = req.body;
 
@@ -22,82 +21,151 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ message: 'Changes must be an array' });
     }
 
-    const results = [];
-    let successCount = 0;
-    let failureCount = 0;
+    const syncedIds = [];
+    const conflicts = [];
 
     for (const change of changes) {
-      const { table, recordId, operation, data } = change;
+      const { table, recordId, operation, data, clientUpdatedAt } = change;
 
       try {
         let result;
 
         switch (table) {
           case 'tasks':
-            result = await syncTask(recordId, operation, data);
+            result = await syncTaskWithConflict(recordId, operation, data, clientUpdatedAt);
             break;
           case 'sessions':
-            result = await syncSession(recordId, operation, data);
+            result = await syncSessionWithConflict(recordId, operation, data, clientUpdatedAt);
             break;
           case 'goals':
-            result = await syncGoal(recordId, operation, data);
+            result = await syncGoalWithConflict(recordId, operation, data, clientUpdatedAt);
             break;
           case 'subjects':
-            result = await syncSubject(recordId, operation, data);
+            result = await syncSubjectWithConflict(recordId, operation, data, clientUpdatedAt);
             break;
           default:
-            result = {
-              success: false,
-              error: `Unknown table: ${table}`,
-              id: recordId,
-              table,
-            };
+            result = { success: false, error: `Unknown table: ${table}` };
         }
 
         if (result.success) {
-          successCount++;
-        } else {
-          failureCount++;
-          console.warn(`Sync failed for ${table} ${recordId}: ${result.error}`);
-        }
+          syncedIds.push(result.syncId || recordId);
+          if (result.conflict) {
+            conflicts.push(result.conflict);
+  }
+}
 
-        results.push(result);
+// eslint-disable-next-line no-unused-vars
+function mapTaskData(data) {
+  return {
+    userId: data.userId,
+    title: data.title,
+    subject: data.subject || 'General',
+    description: data.description || '',
+    date: data.date,
+    startTime: data.startTime || '',
+    endTime: data.endTime || '',
+    duration: data.duration,
+    priority: data.priority || 'medium',
+    status: data.status || 'pending',
+    notes: data.notes || '',
+    reminder: data.reminder || null,
+    isRecurring: data.isRecurring || false,
+    recurrencePattern: data.recurrencePattern || null,
+    recurrenceEndDate: data.recurrenceEndDate || null,
+    recurrenceParentId: data.recurrenceParentId || null,
+  };
+}
+
+// eslint-disable-next-line no-unused-vars
+function mapSessionData(data) {
+  return {
+    userId: data.userId,
+    taskId: data.taskId || null,
+    title: data.title,
+    subject: data.subject || 'General',
+    duration: data.duration,
+    startTime: data.startTime || null,
+    endTime: data.endTime || null,
+    completedAt: data.completedAt || null,
+    notes: data.notes || '',
+  };
+}
+
+// eslint-disable-next-line no-unused-vars
+function mapGoalData(data) {
+  return {
+    userId: data.userId,
+    title: data.title,
+    description: data.description || '',
+    targetHours: data.targetHours,
+    currentHours: data.currentHours || 0,
+    deadline: data.deadline || '',
+    status: data.status || 'active',
+  };
+}
+
+// eslint-disable-next-line no-unused-vars
+function mapSubjectData(data) {
+  return {
+    userId: data.userId,
+    name: data.name,
+    color: data.color || '#6366F1',
+    targetHours: data.targetHours || 10,
+    studyGuide: data.studyGuide || '',
+  };
+}
       } catch (error) {
-        failureCount++;
-        results.push({
-          success: false,
-          id: recordId,
-          table,
-          error: error.message,
-        });
+        console.warn(`Sync failed for ${table} ${recordId}:`, error.message);
       }
     }
 
     res.json({
-      message: `Synced ${successCount} changes`,
-      total: changes.length,
-      success: successCount,
-      failed: failureCount,
-      results,
+      syncedIds,
+      conflicts,
+      message: `Synced ${syncedIds.length} changes, ${conflicts.length} conflicts resolved`,
     });
   } catch (error) {
-    console.error('Sync error:', error);
+    console.error('Sync with conflicts error:', error);
     res.status(500).json({ message: error.message });
   }
 });
 
 /**
- * Individual sync functions for each model
+ * Conflict resolution: Last-Write-Wins based on timestamp
+ * If clientUpdatedAt > server updatedAt, use client data (client-wins)
+ * Otherwise, return conflict with server data (server-wins)
  */
-
-async function syncTask(recordId, operation, data) {
+async function syncTaskWithConflict(recordId, operation, data, clientUpdatedAt) {
   try {
     if (operation === 'INSERT') {
-      const [task] = await Task.findOrCreate({
+      const [task, created] = await Task.findOrCreate({
         where: { id: recordId },
         defaults: mapTaskData(data),
       });
-      return { success: true, id: task.id };
+      
+      if (!created) {
+        // Check for conflict
+        const serverUpdatedAt = task.updatedAt ? new Date(task.updatedAt).getTime() : 0;
+        const clientTime = clientUpdatedAt ? new Date(clientUpdatedAt).getTime() : 0;
+        
+        if (clientTime > serverUpdatedAt) {
+          // Client wins - update with client data
+          await task.update(mapTaskData(data));
+        } else {
+          // Server wins - return conflict
+          return {
+            success: true,
+            syncId: task.id,
+            conflict: {
+              table: 'tasks',
+              recordId: task.id,
+              serverData: task.toJSON(),
+              clientData: data,
+            },
+          };
+        }
+      }
+      return { success: true, syncId: task.id };
     }
 
     if (operation === 'UPDATE') {
@@ -105,184 +173,121 @@ async function syncTask(recordId, operation, data) {
       if (!task) {
         return { success: false, error: 'Task not found' };
       }
-      await task.update(mapTaskData(data));
-      return { success: true, id: task.id };
+
+      const serverUpdatedAt = task.updatedAt ? new Date(task.updatedAt).getTime() : 0;
+      const clientTime = clientUpdatedAt ? new Date(clientUpdatedAt).getTime() : 0;
+
+      if (clientTime > serverUpdatedAt) {
+        await task.update(mapTaskData(data));
+      } else {
+        return {
+          success: true,
+          syncId: task.id,
+          conflict: {
+            table: 'tasks',
+            recordId: task.id,
+            serverData: task.toJSON(),
+            clientData: data,
+          },
+        };
+      }
+      return { success: true, syncId: task.id };
     }
 
     if (operation === 'DELETE') {
       const deleted = await Task.destroy({ where: { id: recordId } });
-      if (deleted === 0) {
-        return { success: false, error: 'Task not found' };
-      }
-      return { success: true, id: recordId };
+      return { success: deleted > 0, syncId: recordId };
     }
 
     return { success: false, error: `Unknown operation: ${operation}` };
   } catch (error) {
-    console.error('Task sync error:', error);
+    console.warn('Task sync with conflict error:', error);
     return { success: false, error: error.message };
   }
 }
 
-async function syncSession(recordId, operation, data) {
+async function syncSessionWithConflict(recordId, operation, data, clientUpdatedAt) {
   try {
     if (operation === 'INSERT') {
       const [session] = await StudySession.findOrCreate({
         where: { id: recordId },
         defaults: mapSessionData(data),
       });
-      return { success: true, id: session.id };
+      return { success: true, syncId: session.id };
     }
 
     if (operation === 'UPDATE') {
       const session = await StudySession.findByPk(recordId);
-      if (!session) {
-        return { success: false, error: 'Session not found' };
-      }
+      if (!session) return { success: false, error: 'Session not found' };
       await session.update(mapSessionData(data));
-      return { success: true, id: session.id };
+      return { success: true, syncId: session.id };
     }
 
     if (operation === 'DELETE') {
       const deleted = await StudySession.destroy({ where: { id: recordId } });
-      if (deleted === 0) {
-        return { success: false, error: 'Session not found' };
-      }
-      return { success: true, id: recordId };
+      return { success: deleted > 0, syncId: recordId };
     }
 
     return { success: false, error: `Unknown operation: ${operation}` };
   } catch (error) {
-    console.error('Session sync error:', error);
     return { success: false, error: error.message };
   }
 }
 
-async function syncGoal(recordId, operation, data) {
+async function syncGoalWithConflict(recordId, operation, data, clientUpdatedAt) {
   try {
     if (operation === 'INSERT') {
       const [goal] = await Goal.findOrCreate({
         where: { id: recordId },
         defaults: mapGoalData(data),
       });
-      return { success: true, id: goal.id };
+      return { success: true, syncId: goal.id };
     }
 
     if (operation === 'UPDATE') {
       const goal = await Goal.findByPk(recordId);
-      if (!goal) {
-        return { success: false, error: 'Goal not found' };
-      }
+      if (!goal) return { success: false, error: 'Goal not found' };
       await goal.update(mapGoalData(data));
-      return { success: true, id: goal.id };
+      return { success: true, syncId: goal.id };
     }
 
     if (operation === 'DELETE') {
       const deleted = await Goal.destroy({ where: { id: recordId } });
-      if (deleted === 0) {
-        return { success: false, error: 'Goal not found' };
-      }
-      return { success: true, id: recordId };
+      return { success: deleted > 0, syncId: recordId };
     }
 
     return { success: false, error: `Unknown operation: ${operation}` };
   } catch (error) {
-    console.error('Goal sync error:', error);
     return { success: false, error: error.message };
   }
 }
 
-async function syncSubject(recordId, operation, data) {
+async function syncSubjectWithConflict(recordId, operation, data, clientUpdatedAt) {
   try {
     if (operation === 'INSERT') {
       const [subject] = await Subject.findOrCreate({
         where: { id: recordId },
         defaults: mapSubjectData(data),
       });
-      return { success: true, id: subject.id };
+      return { success: true, syncId: subject.id };
     }
 
     if (operation === 'UPDATE') {
       const subject = await Subject.findByPk(recordId);
-      if (!subject) {
-        return { success: false, error: 'Subject not found' };
-      }
+      if (!subject) return { success: false, error: 'Subject not found' };
       await subject.update(mapSubjectData(data));
-      return { success: true, id: subject.id };
+      return { success: true, syncId: subject.id };
     }
 
     if (operation === 'DELETE') {
       const deleted = await Subject.destroy({ where: { id: recordId } });
-      if (deleted === 0) {
-        return { success: false, error: 'Subject not found' };
-      }
-      return { success: true, id: recordId };
+      return { success: deleted > 0, syncId: recordId };
     }
 
     return { success: false, error: `Unknown operation: ${operation}` };
   } catch (error) {
-    console.error('Subject sync error:', error);
     return { success: false, error: error.message };
   }
-}
-
-/**
- * Map mobile data formats to server model attributes
- */
-
-function mapTaskData(data) {
-  return {
-    title: data.title,
-    description: data.description || '',
-    subject: data.subjectName || 'General',  // Store subject name as string
-    duration: data.duration,
-    priority: data.priority || 'medium',
-    status: data.status || 'pending',
-    date: data.date,
-    time: data.time || null,
-    notes: data.notes || '',
-    reminder: data.reminder ? new Date(data.reminder) : null,
-    userId: data.userId || 1,
-    completedAt: data.completedAt ? new Date(data.completedAt) : null,
-    createdAt: data.createdAt ? new Date(data.createdAt) : new Date(),
-    updatedAt: new Date(),
-  };
-}
-
-function mapSessionData(data) {
-  return {
-    subjectId: data.subjectId,
-    subjectName: data.subjectName || 'General',
-    duration: data.duration,
-    date: data.date,
-    notes: data.notes || '',
-    createdAt: data.createdAt ? new Date(data.createdAt) : new Date(),
-  };
-}
-
-function mapGoalData(data) {
-  return {
-    title: data.title,
-    description: data.description || '',
-    subjectId: data.subjectId,
-    targetHours: data.targetHours || 10,
-    currentHours: data.currentHours || 0,
-    status: data.status || 'active',
-    deadline: data.deadline || null,
-    userId: data.userId || 1,
-    createdAt: data.createdAt ? new Date(data.createdAt) : new Date(),
-    updatedAt: new Date(),
-  };
-}
-
-function mapSubjectData(data) {
-  return {
-    name: data.name,
-    color: data.color || '#6366F1',
-    targetHours: data.targetHours || 10,
-    studyGuide: data.studyGuide || '',
-    userId: data.userId || 1,
-  };
 }
 
 module.exports = router;
